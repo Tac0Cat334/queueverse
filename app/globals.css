@@ -178,6 +178,29 @@ body {
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.625rem 1.25rem;
+  border-radius: 0.75rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  background: var(--fg);
+  color: var(--bg);
+  border: 1px solid var(--fg);
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.btn-primary:hover {
+  opacity: 0.92;
+}
+
+.btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* ── Navbar ── */
 .nav-bar {
   background: color-mix(in srgb, var(--bg) 85%, transparent);

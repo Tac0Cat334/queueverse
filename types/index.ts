@@ -105,4 +105,115 @@ export interface ChartDataPoint {
   timestamp: string;
   wait_time: number;
   label: string;
+  historical_avg?: number;
+}
+
+export type RecommendationType =
+  | "best_now"
+  | "great_time"
+  | "below_normal"
+  | "unusually_low"
+  | "trending_up"
+  | "expected_rise"
+  | "neutral";
+
+export type RecommendationCategory =
+  | "best_right_now"
+  | "great_time"
+  | "below_normal"
+  | "trending_up"
+  | "expected_rise";
+
+export interface RideRecommendation {
+  rideId: number;
+  rideName: string;
+  land: string;
+  currentWait: number;
+  opportunityScore: number;
+  label: string;
+  reason: string;
+  category: RecommendationCategory;
+  vsAveragePercent: number | null;
+  trend: TrendInfo;
+}
+
+export interface RideIntelligence {
+  rideId: number;
+  rideName: string;
+  land: string;
+  currentWait: number;
+  isOpen: boolean;
+  historicalAverage: number | null;
+  vsAveragePercent: number | null;
+  comparisonMessage: string;
+  opportunityScore: number;
+  recommendationType: RecommendationType;
+  recommendationLabel: string;
+  trend: TrendInfo;
+  waitDrop: { amount: number; message: string } | null;
+  predictedWait30: number | null;
+  predictedWait60: number | null;
+  volatilityScore: number;
+  reliabilityScore: number | null;
+  downtimeFrequency: number;
+  bestTimeToRide: string | null;
+  bestTimeAverage: number | null;
+  peakTimeToRide: string | null;
+  peakTimeAverage: number | null;
+  hourlyPattern: { hour: number; label: string; average: number; count: number }[];
+  trendForecast: string;
+  popularityPercentile: number;
+}
+
+export interface ParkRecommendations {
+  bestRightNow: RideRecommendation[];
+  greatTimeToRide: RideRecommendation[];
+  lowerThanNormal: RideRecommendation[];
+  trendingUpFast: RideRecommendation[];
+  expectedToRiseSoon: RideRecommendation[];
+  byRideId: Record<number, RideIntelligence>;
+  generatedAt: string;
+}
+
+export interface IntelligencePayload {
+  recommendations: ParkRecommendations;
+  configured: boolean;
+}
+
+export type TouringPreference = "thrill" | "family" | "mixed";
+
+export interface TouringPlanPreferences {
+  arrivalHour: number;
+  departureHour: number;
+  mustDoRideIds: number[];
+  preference: TouringPreference;
+  expressPass: boolean;
+  lunchBreak: boolean;
+  lunchHour?: number;
+}
+
+export interface TouringPlanItem {
+  time: string;
+  timeMinutes: number;
+  type: "ride" | "break";
+  rideId?: number;
+  rideName?: string;
+  land?: string;
+  estimatedWait?: number;
+  label: string;
+  reason: string;
+}
+
+export interface TouringPlan {
+  items: TouringPlanItem[];
+  preferences: TouringPlanPreferences;
+  missedMustDo: number[];
+  generatedAt: string;
+}
+
+export interface PlanAdjustment {
+  rideId: number;
+  rideName: string;
+  message: string;
+  priority: "urgent" | "opportunity" | "warning";
 }

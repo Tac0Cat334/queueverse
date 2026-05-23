@@ -12,6 +12,12 @@ export function Navbar() {
 
         <div className="flex items-center gap-4">
           <Link
+            href="/intelligence"
+            className="hidden text-sm text-[var(--fg-secondary)] transition-colors hover:text-[var(--fg)] sm:block"
+          >
+            Strategy
+          </Link>
+          <Link
             href="/"
             className="hidden text-sm text-[var(--fg-secondary)] transition-colors hover:text-[var(--fg)] sm:block"
           >

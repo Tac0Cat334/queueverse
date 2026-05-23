@@ -2,11 +2,12 @@
 
 import { useState, useMemo, useCallback, useEffect } from "react";
 import { Search, RefreshCw, Star } from "lucide-react";
-import type { RideWithLiveData, SortOption, RideInsight, WaitDropAlert } from "@/types";
+import type { RideWithLiveData, SortOption, RideInsight, WaitDropAlert, RideIntelligence } from "@/types";
 import { Hero } from "./Hero";
 import { ParkSummary } from "./ParkSummary";
 import { RideCard, RideCardSkeleton } from "./RideCard";
 import { DataAttribution } from "./DataAttribution";
+import { IntelligenceTeaser } from "./intelligence/IntelligenceTeaser";
 import { computeParkIntelligence } from "@/lib/park-intelligence";
 import { sortRidesWithFavoritesFilter } from "@/lib/analytics";
 import { getLatestUpdateTime } from "@/lib/queue-times";
@@ -15,9 +16,22 @@ import { useAutoRefresh } from "@/hooks/use-auto-refresh";
 import { useDebouncedValue } from "@/hooks/use-auto-refresh";
 import { useFavorites } from "@/hooks/use-favorites";
 import { cn } from "@/utils/wait-time";
+import type { ParkRecommendations } from "@/types";
 
 interface DashboardProps {
   initialRides: RideWithLiveData[];
+}
+
+function intelligenceToInsight(intel: RideIntelligence): RideInsight {
+  return {
+    bestTime: intel.bestTimeToRide,
+    bestTimeAvg: intel.bestTimeAverage,
+    trend: intel.trend.trend,
+    trendLabel: intel.trend.label,
+    trendChange: intel.trend.change,
+    waitDrop: intel.waitDrop,
+    reliability: intel.reliabilityScore,
+  };
 }
 
 const sortOptions: { value: SortOption; label: string; icon?: typeof Star }[] = [
@@ -34,16 +48,29 @@ export function Dashboard({ initialRides }: DashboardProps) {
   const [sort, setSort] = useState<SortOption>("highest");
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [insights, setInsights] = useState<Record<number, RideInsight>>({});
+  const [intelligence, setIntelligence] = useState<ParkRecommendations | null>(null);
+  const [intelLoading, setIntelLoading] = useState(true);
   const debouncedSearch = useDebouncedValue(search);
   const { favorites, toggleFavorite, isFavorite } = useFavorites();
 
-  const fetchInsights = useCallback(async () => {
+  const fetchIntelligence = useCallback(async () => {
     try {
-      const res = await fetch("/api/insights", { cache: "no-store" });
+      const res = await fetch("/api/intelligence", { cache: "no-store" });
       const data = await res.json();
-      if (data.insights) setInsights(data.insights);
+      if (data.recommendations) {
+        setIntelligence(data.recommendations);
+        const mapped: Record<number, RideInsight> = {};
+        for (const [id, intel] of Object.entries(
+          data.recommendations.byRideId as Record<string, RideIntelligence>
+        )) {
+          mapped[Number(id)] = intelligenceToInsight(intel);
+        }
+        setInsights(mapped);
+      }
     } catch {
       // optional
+    } finally {
+      setIntelLoading(false);
     }
   }, []);
 
@@ -52,7 +79,7 @@ export function Dashboard({ initialRides }: DashboardProps) {
     try {
       const [liveRes] = await Promise.all([
         fetch("/api/live", { cache: "no-store" }),
-        fetchInsights(),
+        fetchIntelligence(),
       ]);
       if (!liveRes.ok) return;
 
@@ -61,11 +88,11 @@ export function Dashboard({ initialRides }: DashboardProps) {
     } finally {
       setIsRefreshing(false);
     }
-  }, [fetchInsights]);
+  }, [fetchIntelligence]);
 
   useEffect(() => {
-    fetchInsights();
-  }, [fetchInsights]);
+    fetchIntelligence();
+  }, [fetchIntelligence]);
 
   useAutoRefresh(refresh, REFRESH_INTERVAL_MS);
 
@@ -101,6 +128,10 @@ export function Dashboard({ initialRides }: DashboardProps) {
     <>
       <Hero lastUpdated={lastUpdated} />
       <ParkSummary intel={intel} waitDrops={waitDrops} />
+      <IntelligenceTeaser
+        recommendations={intelligence}
+        loading={intelLoading}
+      />
 
       <section className="mx-auto mt-10 max-w-5xl px-4 pb-16 sm:px-6" id="rides">
         <div className="sticky top-[57px] z-40 -mx-4 bg-[var(--bg)] px-4 py-3 sm:-mx-6 sm:px-6">
@@ -157,6 +188,9 @@ export function Dashboard({ initialRides }: DashboardProps) {
                 key={ride.ride_id}
                 ride={ride}
                 insight={insights[ride.ride_id]}
+                opportunityScore={
+                  intelligence?.byRideId[ride.ride_id]?.opportunityScore
+                }
                 isFavorite={isFavorite(ride.ride_id)}
                 onToggleFavorite={() => toggleFavorite(ride.ride_id)}
               />

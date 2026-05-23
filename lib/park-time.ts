@@ -7,7 +7,7 @@ export const PARK_DAY_CHART = {
   endHour: 22,
 } as const;
 
-function getParkParts(date: Date) {
+export function getParkParts(date: Date) {
   const formatter = new Intl.DateTimeFormat("en-US", {
     timeZone: PARK_TIMEZONE,
     year: "numeric",

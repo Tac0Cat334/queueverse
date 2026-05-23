@@ -7,10 +7,12 @@ import { getWaitLevel, getWaitLevelClass, formatWaitTime } from "@/utils/wait-ti
 import { RelativeTime } from "./RelativeTime";
 import { TrendBadge } from "./TrendBadge";
 import { FavoriteButton } from "./FavoriteButton";
+import { OpportunityBadge } from "./intelligence/OpportunityBadge";
 
 interface RideCardProps {
   ride: RideWithLiveData;
   insight?: RideInsight;
+  opportunityScore?: number;
   isFavorite?: boolean;
   onToggleFavorite?: () => void;
 }
@@ -18,6 +20,7 @@ interface RideCardProps {
 export function RideCard({
   ride,
   insight,
+  opportunityScore,
   isFavorite,
   onToggleFavorite,
 }: RideCardProps) {
@@ -68,6 +71,9 @@ export function RideCard({
           </span>
 
           <div className="flex shrink-0 flex-col items-end gap-1 text-right">
+            {opportunityScore !== undefined && ride.is_open && (
+              <OpportunityBadge score={opportunityScore} />
+            )}
             {insight?.waitDrop && (
               <span className="text-[10px] font-medium text-[var(--wait-low)]">
                 ↓ {insight.waitDrop.amount}m drop

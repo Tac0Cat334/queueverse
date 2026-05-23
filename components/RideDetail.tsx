@@ -6,12 +6,17 @@ import { ArrowLeft } from "lucide-react";
 import type { RideWithLiveData, WaitTimeRecord } from "@/types";
 import { DailyWaitChart, WeeklyPatternChart } from "./WaitChart";
 import { computeRideAnalytics, computeLiveTrend } from "@/lib/analytics";
+import {
+  computeRideIntelligence,
+  buildHistoricalAverageSeries,
+} from "@/lib/ride-intelligence";
 import { buildTodayChartData } from "@/lib/daily-chart";
 import { formatParkDateLabel } from "@/lib/park-time";
 import { getWaitLevel, getWaitLevelClass, formatWaitTime, cn } from "@/utils/wait-time";
 import { RelativeTime } from "./RelativeTime";
 import { FavoriteButton } from "./FavoriteButton";
 import { TrendBadge } from "./TrendBadge";
+import { OpportunityBadge } from "./intelligence/OpportunityBadge";
 import { useAutoRefresh } from "@/hooks/use-auto-refresh";
 import { useFavorites } from "@/hooks/use-favorites";
 import { REFRESH_INTERVAL_MS } from "@/lib/constants";
@@ -86,6 +91,11 @@ export function RideDetail({ ride: initialRide }: RideDetailProps) {
     [historyRecords]
   );
 
+  const intelligence = useMemo(
+    () => computeRideIntelligence(ride, historyRecords),
+    [ride, historyRecords]
+  );
+
   const allRecords = useMemo(() => {
     const byKey = new Map<string, WaitTimeRecord>();
     for (const record of [...historyRecords, ...todayRecords]) {
@@ -94,10 +104,18 @@ export function RideDetail({ ride: initialRide }: RideDetailProps) {
     return Array.from(byKey.values());
   }, [historyRecords, todayRecords]);
 
-  const todayChartData = useMemo(
-    () => buildTodayChartData(allRecords, ride),
-    [allRecords, ride]
-  );
+  const todayChartData = useMemo(() => {
+    const base = buildTodayChartData(allRecords, ride);
+    const historicalOpen = historyRecords.filter((r) => r.is_open);
+    const averages = buildHistoricalAverageSeries(
+      historicalOpen,
+      base.map((d) => d.timestamp)
+    );
+    return base.map((point, index) => ({
+      ...point,
+      historical_avg: averages[index] > 0 ? averages[index] : undefined,
+    }));
+  }, [allRecords, ride, historyRecords]);
 
   const todaySnapshotCount = todayChartData.length;
 
@@ -152,9 +170,17 @@ export function RideDetail({ ride: initialRide }: RideDetailProps) {
               {formatWaitTime(ride.wait_time, ride.is_open)}
             </p>
             {ride.is_open && (
-              <div className="mt-3">
+              <div className="mt-3 flex flex-wrap items-center gap-2">
                 <TrendBadge trend={trend.trend} label={trend.label} change={trend.change} />
+                {intelligence.isOpen && (
+                  <OpportunityBadge score={intelligence.opportunityScore} size="md" />
+                )}
               </div>
+            )}
+            {intelligence.comparisonMessage && ride.is_open && (
+              <p className="mt-2 text-xs text-[var(--fg-secondary)]">
+                {intelligence.comparisonMessage}
+              </p>
             )}
           </div>
           <div className="mb-2 text-right">
@@ -179,19 +205,58 @@ export function RideDetail({ ride: initialRide }: RideDetailProps) {
         <div className="card mt-4 p-5 sm:p-6">
           <p className="label mb-3">Ride intelligence</p>
           <p className="text-sm leading-relaxed text-[var(--fg-secondary)]">
-            Historically,{" "}
-            <span className="font-medium text-[var(--fg)]">{ride.name}</span> has
-            its lowest average wait around{" "}
-            <span className="font-medium text-[var(--fg)]">
-              {analytics.bestTimeToRide}
-            </span>{" "}
-            ({analytics.bestTimeAverageWait} min avg). Peak crowds typically hit
-            around{" "}
-            <span className="font-medium text-[var(--fg)]">
-              {analytics.peakTimeToRide}
-            </span>{" "}
-            ({analytics.peakTimeAverageWait} min avg).
+            {intelligence.vsAveragePercent !== null &&
+            intelligence.vsAveragePercent >= 10 ? (
+              <>
+                Currently{" "}
+                <span className="font-medium text-[var(--wait-low)]">
+                  {intelligence.vsAveragePercent}% below average
+                </span>{" "}
+                for this time of day.
+              </>
+            ) : intelligence.vsAveragePercent !== null &&
+              intelligence.vsAveragePercent <= -10 ? (
+              <>
+                Currently{" "}
+                <span className="font-medium text-[var(--wait-high)]">
+                  {Math.abs(intelligence.vsAveragePercent)}% above average
+                </span>{" "}
+                for this time of day.
+              </>
+            ) : (
+              <>
+                Wait is near typical levels for{" "}
+                <span className="font-medium text-[var(--fg)]">{ride.name}</span>{" "}
+                at this time.
+              </>
+            )}{" "}
+            {intelligence.trendForecast && (
+              <span>{intelligence.trendForecast}.</span>
+            )}
           </p>
+
+          {(intelligence.predictedWait30 !== null ||
+            intelligence.predictedWait60 !== null) && (
+            <div className="mt-4 flex flex-wrap gap-3 text-xs text-[var(--fg-muted)]">
+              {intelligence.predictedWait30 !== null && (
+                <span>
+                  Expected in 30 min:{" "}
+                  <span className="font-medium text-[var(--fg)]">
+                    {intelligence.predictedWait30}m
+                  </span>
+                </span>
+              )}
+              {intelligence.predictedWait60 !== null && (
+                <span>
+                  Expected in 1 hr:{" "}
+                  <span className="font-medium text-[var(--fg)]">
+                    {intelligence.predictedWait60}m
+                  </span>
+                </span>
+              )}
+            </div>
+          )}
+
           <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
             <div className="rounded-xl bg-[var(--surface-hover)] p-3">
               <p className="label">Best window</p>
@@ -206,9 +271,9 @@ export function RideDetail({ ride: initialRide }: RideDetailProps) {
               </p>
             </div>
             <div className="rounded-xl bg-[var(--surface-hover)] p-3">
-              <p className="label">Avg today</p>
+              <p className="label">Volatility</p>
               <p className="metric mt-1 text-lg font-semibold">
-                {analytics.averageWaitToday}m
+                {intelligence.volatilityScore}/100
               </p>
             </div>
             <div className="rounded-xl bg-[var(--surface-hover)] p-3">
@@ -220,6 +285,12 @@ export function RideDetail({ ride: initialRide }: RideDetailProps) {
               </p>
             </div>
           </div>
+
+          <p className="mt-4 text-xs text-[var(--fg-muted)]">
+            {intelligence.recommendationLabel}
+            {intelligence.historicalAverage !== null &&
+              ` · Typical now: ${intelligence.historicalAverage} min`}
+          </p>
         </div>
       )}
 
@@ -238,6 +309,7 @@ export function RideDetail({ ride: initialRide }: RideDetailProps) {
             currentWait={ride.is_open ? ride.wait_time : undefined}
             isOpen={ride.is_open}
             snapshotCount={todaySnapshotCount}
+            historicalAverage={intelligence.historicalAverage}
           />
         )}
       </div>

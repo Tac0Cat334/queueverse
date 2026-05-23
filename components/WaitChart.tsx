@@ -10,6 +10,7 @@ import {
   Area,
   AreaChart,
   ReferenceDot,
+  Line,
 } from "recharts";
 import type { ChartDataPoint } from "@/types";
 import { useChartColors } from "./ThemeProvider";
@@ -24,6 +25,7 @@ type ChartColors = ReturnType<typeof useChartColors>;
 interface EnrichedPoint extends ChartDataPoint {
   timeMs: number;
   displayLabel: string;
+  historical_avg?: number;
 }
 
 function averageWait(points: EnrichedPoint[]): number {
@@ -158,6 +160,7 @@ interface DailyWaitChartProps {
   currentWait?: number;
   isOpen?: boolean;
   snapshotCount?: number;
+  historicalAverage?: number | null;
 }
 
 export function DailyWaitChart({
@@ -165,6 +168,7 @@ export function DailyWaitChart({
   currentWait,
   isOpen,
   snapshotCount = 0,
+  historicalAverage,
 }: DailyWaitChartProps) {
   const colors = useChartColors();
   const fillId = useId().replace(/:/g, "");
@@ -213,7 +217,10 @@ export function DailyWaitChart({
     );
   }
 
-  const yMax = Math.max(...chartData.map((d) => d.wait_time));
+  const yMax = Math.max(
+    ...chartData.map((d) => d.wait_time),
+    ...chartData.map((d) => d.historical_avg ?? 0)
+  );
   const yDomain: [number, number] = [0, Math.max(yMax + 10, 15)];
 
   const showPeak =
@@ -225,6 +232,10 @@ export function DailyWaitChart({
     highlights.latest &&
     highlights.low.timeMs !== highlights.latest.timeMs &&
     highlights.low.timeMs !== highlights.peak?.timeMs;
+
+  const hasHistoricalOverlay = chartData.some(
+    (d) => d.historical_avg !== undefined && d.historical_avg > 0
+  );
 
   return (
     <div className="card overflow-hidden p-4 sm:p-6">
@@ -239,6 +250,11 @@ export function DailyWaitChart({
                   min
                 </span>
               </p>
+              {historicalAverage !== null && historicalAverage !== undefined && (
+                <p className="mt-1 text-xs text-[var(--fg-muted)]">
+                  Typical now: {historicalAverage} min
+                </p>
+              )}
             </>
           ) : (
             <p className="text-sm text-[var(--fg-muted)]">Wait trend today</p>
@@ -331,6 +347,20 @@ export function DailyWaitChart({
             isAnimationActive
           />
 
+          {hasHistoricalOverlay && (
+            <Line
+              type="monotone"
+              dataKey="historical_avg"
+              stroke={colors.tick}
+              strokeWidth={1.25}
+              strokeDasharray="6 4"
+              dot={false}
+              activeDot={false}
+              animationDuration={900}
+              animationEasing="ease-out"
+            />
+          )}
+
           {showPeak && highlights.peak && (
             <ReferenceDot
               x={highlights.peak.timeMs}
@@ -396,6 +426,12 @@ export function DailyWaitChart({
               style={{ background: colors.low }}
             />
             Lowest
+          </span>
+        )}
+        {hasHistoricalOverlay && (
+          <span className="inline-flex items-center gap-1.5">
+            <span className="inline-block h-px w-3 border-t border-dashed border-[var(--fg-muted)]" />
+            Historical avg
           </span>
         )}
       </div>

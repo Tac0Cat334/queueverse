@@ -7,14 +7,18 @@ import type {
   SortOption,
   CrowdScore,
 } from "@/types";
-import { formatHourLabel, formatHourMinute } from "@/utils/wait-time";
+import { formatHourMinute } from "@/utils/wait-time";
 import { WAIT_THRESHOLDS } from "@/lib/constants";
 import {
   subDays,
-  getHours,
-  getMinutes,
 } from "date-fns";
 import { getParkStartOfDay } from "@/lib/park-time";
+import {
+  bucketRecordsByHour,
+  bucketRecordsByTenMinutes,
+  findBestTenMinuteBucket,
+  findPeakTenMinuteBucket,
+} from "@/lib/time-buckets";
 
 export function getTimeRangeStart(range: "today" | "7d" | "30d"): Date {
   const now = new Date();
@@ -40,75 +44,11 @@ export function filterRecordsByRange(
 }
 
 function bucketByHour(records: WaitTimeRecord[]) {
-  const buckets = new Map<number, { total: number; count: number }>();
-
-  for (const record of records) {
-    if (!record.is_open) continue;
-    const hour = getHours(new Date(record.timestamp));
-    const bucket = buckets.get(hour) ?? { total: 0, count: 0 };
-    bucket.total += record.wait_time;
-    bucket.count += 1;
-    buckets.set(hour, bucket);
-  }
-
-  return Array.from(buckets.entries())
-    .map(([hour, { total, count }]) => ({
-      hour,
-      label: formatHourLabel(hour),
-      average: Math.round(total / count),
-      count,
-    }))
-    .sort((a, b) => a.hour - b.hour);
+  return bucketRecordsByHour(records);
 }
 
 function bucketByTenMinutes(records: WaitTimeRecord[]) {
-  const buckets = new Map<string, { total: number; count: number }>();
-
-  for (const record of records) {
-    if (!record.is_open) continue;
-    const date = new Date(record.timestamp);
-    const hour = getHours(date);
-    const minuteBucket = Math.floor(getMinutes(date) / 10) * 10;
-    const key = `${hour}:${minuteBucket}`;
-    const bucket = buckets.get(key) ?? { total: 0, count: 0 };
-    bucket.total += record.wait_time;
-    bucket.count += 1;
-    buckets.set(key, bucket);
-  }
-
-  return buckets;
-}
-
-function findBestBucket(buckets: Map<string, { total: number; count: number }>) {
-  let best = { hour: 0, minute: 0, average: Infinity };
-  for (const [key, { total, count }] of buckets.entries()) {
-    const [hourStr, minuteStr] = key.split(":");
-    const average = total / count;
-    if (average < best.average) {
-      best = {
-        hour: Number(hourStr),
-        minute: Number(minuteStr),
-        average: Math.round(average),
-      };
-    }
-  }
-  return best;
-}
-
-function findPeakBucket(buckets: Map<string, { total: number; count: number }>) {
-  let peak = { hour: 0, minute: 0, average: -Infinity };
-  for (const [key, { total, count }] of buckets.entries()) {
-    const [hourStr, minuteStr] = key.split(":");
-    const average = total / count;
-    if (average > peak.average) {
-      peak = {
-        hour: Number(hourStr),
-        minute: Number(minuteStr),
-        average: Math.round(average),
-      };
-    }
-  }
-  return peak;
+  return bucketRecordsByTenMinutes(records);
 }
 
 export function computeReliabilityScore(
@@ -276,8 +216,8 @@ export function computeRideAnalytics(
       : { hour: 0, label: "N/A", average: 0, count: 0 };
 
   const tenMinuteBuckets = bucketByTenMinutes(historicalOpen);
-  const bestBucket = findBestBucket(tenMinuteBuckets);
-  const peakBucket = findPeakBucket(tenMinuteBuckets);
+  const bestBucket = findBestTenMinuteBucket(tenMinuteBuckets);
+  const peakBucket = findPeakTenMinuteBucket(tenMinuteBuckets);
 
   const lowestAverageWait =
     openRecords.length > 0
@@ -320,7 +260,7 @@ export function computeBestTimeInsight(
   if (openRecords.length < 3) return null;
 
   const buckets = bucketByTenMinutes(openRecords);
-  const best = findBestBucket(buckets);
+  const best = findBestTenMinuteBucket(buckets);
   if (best.average === Infinity) return null;
 
   return {
