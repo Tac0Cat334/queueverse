@@ -1,13 +1,13 @@
 "use client";
 
-import { formatDistanceToNow } from "date-fns";
 import { BRAND } from "@/lib/brand";
+import { RelativeTime } from "./RelativeTime";
 
 interface HeroProps {
-  lastUpdated: string | null;
+  lastCheckedAt: string | null;
 }
 
-export function Hero({ lastUpdated }: HeroProps) {
+export function Hero({ lastCheckedAt }: HeroProps) {
   return (
     <section className="px-4 pt-12 pb-8 sm:px-6 sm:pt-16">
       <div className="mx-auto max-w-5xl">
@@ -21,9 +21,9 @@ export function Hero({ lastUpdated }: HeroProps) {
           {BRAND.tagline}. {BRAND.subtitle}
         </p>
 
-        {lastUpdated && (
+        {lastCheckedAt && (
           <p className="label mt-5">
-            Updated {formatDistanceToNow(new Date(lastUpdated), { addSuffix: true })}
+            <RelativeTime date={lastCheckedAt} />
           </p>
         )}
       </div>

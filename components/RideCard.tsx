@@ -9,9 +9,10 @@ import { RelativeTime } from "./RelativeTime";
 interface RideCardProps {
   ride: RideWithLiveData;
   insight?: RideInsight;
+  lastCheckedAt?: string | null;
 }
 
-export function RideCard({ ride, insight }: RideCardProps) {
+export function RideCard({ ride, insight, lastCheckedAt }: RideCardProps) {
   const level = getWaitLevel(ride.wait_time, ride.is_open);
 
   return (
@@ -48,7 +49,7 @@ export function RideCard({ ride, insight }: RideCardProps) {
           </span>
 
           <div className="flex shrink-0 flex-col items-end gap-0.5 text-right">
-            <RelativeTime date={ride.last_updated} />
+            {lastCheckedAt && <RelativeTime date={lastCheckedAt} />}
             {insight?.bestTime && (
               <span>Best: {insight.bestTime}</span>
             )}

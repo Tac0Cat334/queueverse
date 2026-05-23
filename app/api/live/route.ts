@@ -3,7 +3,7 @@ import { fetchLiveQueueTimes, flattenRides } from "@/lib/queue-times";
 
 export async function GET() {
   try {
-    const data = await fetchLiveQueueTimes();
+    const data = await fetchLiveQueueTimes({ noStore: true });
     const rides = flattenRides(data);
     return NextResponse.json({ rides, fetchedAt: new Date().toISOString() });
   } catch (error) {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import type { RideWithLiveData, TimeRange, ChartDataPoint, WaitTimeRecord } from "@/types";
@@ -8,10 +8,13 @@ import { WaitChart, HourlyWaitChart } from "./WaitChart";
 import { computeRideAnalytics, filterRecordsByRange } from "@/lib/analytics";
 import { getWaitLevel, getWaitLevelClass, formatWaitTime, cn } from "@/utils/wait-time";
 import { RelativeTime } from "./RelativeTime";
+import { useAutoRefresh } from "@/hooks/use-auto-refresh";
+import { REFRESH_INTERVAL_MS } from "@/lib/constants";
 import { format } from "date-fns";
 
 interface RideDetailProps {
   ride: RideWithLiveData;
+  initialFetchedAt: string;
 }
 
 const rangeOptions: { value: TimeRange; label: string }[] = [
@@ -20,11 +23,31 @@ const rangeOptions: { value: TimeRange; label: string }[] = [
   { value: "30d", label: "30 days" },
 ];
 
-export function RideDetail({ ride }: RideDetailProps) {
+export function RideDetail({ ride: initialRide, initialFetchedAt }: RideDetailProps) {
+  const [ride, setRide] = useState(initialRide);
+  const [lastCheckedAt, setLastCheckedAt] = useState(initialFetchedAt);
   const [range, setRange] = useState<TimeRange>("today");
   const [records, setRecords] = useState<WaitTimeRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [configured, setConfigured] = useState(true);
+
+  const refreshLive = useCallback(async () => {
+    try {
+      const res = await fetch("/api/live", { cache: "no-store" });
+      if (!res.ok) return;
+
+      const data = await res.json();
+      const updated = data.rides?.find(
+        (r: RideWithLiveData) => r.ride_id === initialRide.ride_id
+      );
+      if (updated) setRide(updated);
+      setLastCheckedAt(data.fetchedAt ?? new Date().toISOString());
+    } catch {
+      // keep showing last known data
+    }
+  }, [initialRide.ride_id]);
+
+  useAutoRefresh(refreshLive, REFRESH_INTERVAL_MS);
 
   useEffect(() => {
     const fetchHistory = () => {
@@ -92,7 +115,7 @@ export function RideDetail({ ride }: RideDetailProps) {
               {ride.is_open ? "Open" : "Closed"}
             </span>
             <RelativeTime
-              date={ride.last_updated}
+              date={lastCheckedAt}
               className="mt-1 block text-xs text-[var(--fg-muted)]"
             />
           </div>

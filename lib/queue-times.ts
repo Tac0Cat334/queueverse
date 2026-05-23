@@ -2,10 +2,12 @@ import type { QueueTimesResponse, RideWithLiveData } from "@/types";
 import { EPIC_UNIVERSE_PARK_ID, QUEUE_TIMES_BASE_URL } from "@/lib/constants";
 import { formatRideName } from "@/lib/ride-names";
 
-export async function fetchLiveQueueTimes(): Promise<QueueTimesResponse> {
+export async function fetchLiveQueueTimes(
+  options?: { noStore?: boolean }
+): Promise<QueueTimesResponse> {
   const res = await fetch(
     `${QUEUE_TIMES_BASE_URL}/parks/${EPIC_UNIVERSE_PARK_ID}/queue_times.json`,
-    { next: { revalidate: 60 } }
+    options?.noStore ? { cache: "no-store" } : { next: { revalidate: 60 } }
   );
 
   if (!res.ok) {
