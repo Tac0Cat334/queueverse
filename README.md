@@ -34,8 +34,24 @@ See `.env.example` for all required keys (Supabase, Queue-Times, cron secret).
 2. Import the repo at [vercel.com/new](https://vercel.com/new).
 3. Add all environment variables from `.env.example` in **Project → Settings → Environment Variables**.
 4. Set `NEXT_PUBLIC_SITE_URL` to your Vercel URL after the first deploy (e.g. `https://queueverse.vercel.app`).
-5. Deploy. Cron in `vercel.json` hits `/api/cron/sync-wait-times` every 5 minutes (requires Vercel **Pro**; Hobby runs crons at most once per day).
+5. Deploy.
 6. In Resend, set the webhook URL to `https://YOUR-VERCEL-URL/api/webhooks/resend` with event `email.received`.
+
+### Historical data sync (free, every 5 minutes)
+
+Vercel **Hobby** only allows daily crons, so use a free external scheduler instead:
+
+1. Sign up at [cron-job.org](https://console.cron-job.org) (free).
+2. **Create cron job**:
+   - **URL:** `https://YOUR-VERCEL-URL/api/cron/sync-wait-times`
+   - **Schedule:** every 5 minutes (`*/5 * * * *`)
+   - **Request method:** GET
+3. Under **Advanced** → **Headers**, add:
+   - **Name:** `Authorization`
+   - **Value:** `Bearer YOUR_CRON_SECRET` (same value as `CRON_SECRET` in Vercel)
+4. Save and enable the job.
+
+This keeps Supabase filled with wait-time history without a Vercel Pro plan.
 
 ## Data
 
