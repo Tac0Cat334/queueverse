@@ -3,6 +3,7 @@ import { subDays } from "date-fns";
 import { isSupabaseConfigured, createServiceClient } from "@/lib/supabase";
 import { fetchLiveQueueTimes, flattenRides } from "@/lib/queue-times";
 import { computeParkRecommendations } from "@/lib/ride-intelligence";
+import { EMPTY_DATA_MATURITY } from "@/lib/data-maturity";
 import type { WaitTimeRecord } from "@/types";
 
 export async function GET() {
@@ -19,6 +20,7 @@ export async function GET() {
           trendingUpFast: [],
           expectedToRiseSoon: [],
           byRideId: {},
+          dataMaturity: { ...EMPTY_DATA_MATURITY, totalRides: rides.length },
           generatedAt: new Date().toISOString(),
         },
         rides,

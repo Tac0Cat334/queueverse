@@ -36,7 +36,9 @@ export function IntelligenceTeaser({
             What to ride right now
           </h2>
           <p className="mt-1 text-xs text-[var(--fg-muted)]">
-            Ranked by opportunity score using live waits and 30-day patterns
+            {recommendations?.dataMaturity
+              ? `${recommendations.dataMaturity.maturityLabel} · ${recommendations.dataMaturity.uniqueDays} days learned`
+              : "Ranked by opportunity score using live waits and historical patterns"}
           </p>
         </div>
         <Link

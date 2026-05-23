@@ -1,6 +1,15 @@
 import type { WaitTimeRecord } from "@/types";
 import { formatHourLabel, formatHourMinute } from "@/utils/wait-time";
-import { getParkParts } from "@/lib/park-time";
+import { getParkParts, getParkDayOfWeek } from "@/lib/park-time";
+
+const RECENCY_HALF_LIFE_DAYS = 10;
+
+function recencyWeight(recordTime: Date, reference: Date): number {
+  const ageDays =
+    (reference.getTime() - recordTime.getTime()) / (1000 * 60 * 60 * 24);
+  if (ageDays < 0) return 1;
+  return Math.exp(-ageDays / RECENCY_HALF_LIFE_DAYS);
+}
 
 export interface TimeBucket {
   key: string;
@@ -22,6 +31,12 @@ export interface SlotAverage {
   bucketLabel: string;
   hour: number;
   minute: number;
+  /** How the average was derived */
+  source: "5min" | "10min" | "hour" | "weekday" | "recency";
+  /** Effective weighted sample strength */
+  effectiveSamples?: number;
+  weekdayAverage?: number | null;
+  weekdaySampleCount?: number;
 }
 
 export function getFiveMinuteBucket(date: Date | string): TimeBucket {
@@ -120,13 +135,17 @@ function averageMatchingSlot(
   records: WaitTimeRecord[],
   hour: number,
   minute: number,
-  slotSize: 5 | 10 | 60
+  slotSize: 5 | 10 | 60,
+  weekdayFilter?: number
 ): SlotAverage | null {
   const open = records.filter((r) => r.is_open);
   if (open.length === 0) return null;
 
   const matches = open.filter((record) => {
     const parts = getParkParts(new Date(record.timestamp));
+    if (weekdayFilter !== undefined && getParkDayOfWeek(record.timestamp) !== weekdayFilter) {
+      return false;
+    }
     if (slotSize === 60) return parts.hour === hour;
     const recordMinute =
       slotSize === 5
@@ -141,6 +160,9 @@ function averageMatchingSlot(
     matches.reduce((sum, r) => sum + r.wait_time, 0) / matches.length
   );
 
+  const source: SlotAverage["source"] =
+    slotSize === 60 ? "hour" : slotSize === 10 ? "10min" : "5min";
+
   return {
     average,
     sampleCount: matches.length,
@@ -150,7 +172,122 @@ function averageMatchingSlot(
         : formatHourMinute(hour, minute),
     hour,
     minute,
+    source,
   };
+}
+
+function recencyWeightedSlotAverage(
+  records: WaitTimeRecord[],
+  hour: number,
+  minute: number,
+  slotSize: 5 | 10 | 60,
+  reference: Date,
+  weekdayFilter?: number
+): SlotAverage | null {
+  const open = records.filter((r) => r.is_open);
+  if (open.length === 0) return null;
+
+  let weightedSum = 0;
+  let weightTotal = 0;
+  let rawCount = 0;
+
+  for (const record of open) {
+    const parts = getParkParts(new Date(record.timestamp));
+    if (weekdayFilter !== undefined && getParkDayOfWeek(record.timestamp) !== weekdayFilter) {
+      continue;
+    }
+    let matches = false;
+    if (slotSize === 60) {
+      matches = parts.hour === hour;
+    } else {
+      const recordMinute =
+        slotSize === 5
+          ? Math.floor(parts.minute / 5) * 5
+          : Math.floor(parts.minute / 10) * 10;
+      matches = parts.hour === hour && recordMinute === minute;
+    }
+    if (!matches) continue;
+
+    const weight = recencyWeight(new Date(record.timestamp), reference);
+    weightedSum += record.wait_time * weight;
+    weightTotal += weight;
+    rawCount += 1;
+  }
+
+  if (weightTotal <= 0 || rawCount === 0) return null;
+
+  return {
+    average: Math.round(weightedSum / weightTotal),
+    sampleCount: rawCount,
+    effectiveSamples: Math.round(weightTotal),
+    bucketLabel:
+      slotSize === 60
+        ? formatHourLabel(hour)
+        : formatHourMinute(hour, minute),
+    hour,
+    minute,
+    source: weekdayFilter !== undefined ? "weekday" : "recency",
+  };
+}
+
+/**
+ * Smart baseline: prefers same-weekday + recency-weighted slot data,
+ * falls back to broader buckets as sample count grows.
+ */
+export function getSmartSlotAverage(
+  records: WaitTimeRecord[],
+  reference: Date | string = new Date(),
+  minSamples = 2
+): SlotAverage | null {
+  const ref = new Date(reference);
+  const slot = getFiveMinuteBucket(ref);
+  const weekday = getParkDayOfWeek(ref);
+
+  // Same weekday + 5-min slot (best signal once we have multiple weeks)
+  const weekdayFive = recencyWeightedSlotAverage(
+    records,
+    slot.hour,
+    slot.minute,
+    5,
+    ref,
+    weekday
+  );
+  if (weekdayFive && weekdayFive.sampleCount >= minSamples) {
+    return {
+      ...weekdayFive,
+      weekdayAverage: weekdayFive.average,
+      weekdaySampleCount: weekdayFive.sampleCount,
+      average: weekdayFive.average,
+      source: "weekday",
+    };
+  }
+
+  // Recency-weighted 5-min across all days
+  const recencyFive = recencyWeightedSlotAverage(
+    records,
+    slot.hour,
+    slot.minute,
+    5,
+    ref
+  );
+  if (recencyFive && recencyFive.sampleCount >= minSamples) {
+    const weekdayTen = recencyWeightedSlotAverage(
+      records,
+      slot.hour,
+      Math.floor(slot.minute / 10) * 10,
+      10,
+      ref,
+      weekday
+    );
+    return {
+      ...recencyFive,
+      weekdayAverage: weekdayTen?.average ?? null,
+      weekdaySampleCount: weekdayTen?.sampleCount ?? 0,
+    };
+  }
+
+  // Fall back to standard cascade
+  return getHistoricalAverageForSlot(records, ref, minSamples);
 }
 
 /** Historical average for the same clock-time slot across all collected days. */

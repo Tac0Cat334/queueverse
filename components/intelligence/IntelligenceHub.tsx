@@ -6,11 +6,13 @@ import { ArrowLeft, RefreshCw, Brain } from "lucide-react";
 import type { RideWithLiveData, ParkRecommendations } from "@/types";
 import { RecommendationSection } from "./RecommendationSection";
 import { TouringPlanBuilder } from "./TouringPlanBuilder";
+import { MaturityBanner } from "./MaturityBanner";
+import { ConfidenceBadge } from "./ConfidenceBadge";
 import { computeParkIntelligence } from "@/lib/park-intelligence";
+import { EMPTY_DATA_MATURITY } from "@/lib/data-maturity";
 import { REFRESH_INTERVAL_MS } from "@/lib/constants";
 import { useAutoRefresh } from "@/hooks/use-auto-refresh";
 import { cn } from "@/utils/wait-time";
-import { RelativeTime } from "../RelativeTime";
 
 interface IntelligenceHubProps {
   initialRides: RideWithLiveData[];
@@ -23,6 +25,7 @@ const EMPTY_RECOMMENDATIONS: ParkRecommendations = {
   trendingUpFast: [],
   expectedToRiseSoon: [],
   byRideId: {},
+  dataMaturity: EMPTY_DATA_MATURITY,
   generatedAt: new Date().toISOString(),
 };
 
@@ -84,8 +87,8 @@ export function IntelligenceHub({ initialRides }: IntelligenceHubProps) {
             Ride strategy
           </h1>
           <p className="mt-2 max-w-xl text-sm leading-relaxed text-[var(--fg-secondary)]">
-            Real-time recommendations powered by 30 days of wait history.
-            Know what to ride now, what to avoid, and how to maximize your day.
+            Recommendations learn from every 5-minute snapshot — weekday patterns,
+            recency weighting, and confidence scoring improve automatically over time.
           </p>
         </div>
 
@@ -105,6 +108,10 @@ export function IntelligenceHub({ initialRides }: IntelligenceHubProps) {
           Historical data is still building. Recommendations improve as more
           snapshots are collected every 5 minutes.
         </p>
+      )}
+
+      {!loading && recommendations.dataMaturity && (
+        <MaturityBanner maturity={recommendations.dataMaturity} className="mt-6" />
       )}
 
       {topPick && !loading && (
@@ -133,6 +140,11 @@ export function IntelligenceHub({ initialRides }: IntelligenceHubProps) {
               <p className="mt-1 text-xs text-[var(--fg-muted)]">
                 Opportunity {topPick.opportunityScore}/100
               </p>
+              <ConfidenceBadge
+                score={topPick.confidenceScore}
+                label={topPick.confidenceLabel}
+                className="mt-1.5"
+              />
             </div>
           </div>
         </div>
@@ -143,14 +155,8 @@ export function IntelligenceHub({ initialRides }: IntelligenceHubProps) {
         <StatCard label="Avg wait" value={`${parkIntel.averageWait}m`} />
         <StatCard label="Open rides" value={String(parkIntel.openRides)} />
         <StatCard
-          label="Updated"
-          value={
-            recommendations.generatedAt ? (
-              <RelativeTime date={recommendations.generatedAt} />
-            ) : (
-              "—"
-            )
-          }
+          label="Intelligence"
+          value={recommendations.dataMaturity?.maturityLabel ?? "—"}
         />
       </div>
 

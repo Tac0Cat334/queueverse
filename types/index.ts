@@ -135,6 +135,23 @@ export interface RideRecommendation {
   category: RecommendationCategory;
   vsAveragePercent: number | null;
   trend: TrendInfo;
+  confidenceScore: number;
+  confidenceLabel: string;
+}
+
+export interface DataMaturityMetrics {
+  maturityScore: number;
+  maturityLevel: "learning" | "developing" | "reliable" | "expert";
+  maturityLabel: string;
+  totalSnapshots: number;
+  uniqueDays: number;
+  ridesWithData: number;
+  totalRides: number;
+  oldestSnapshot: string | null;
+  newestSnapshot: string | null;
+  daysToNextTier: number | null;
+  nextTierLabel: string | null;
+  message: string;
 }
 
 export interface RideIntelligence {
@@ -163,6 +180,13 @@ export interface RideIntelligence {
   hourlyPattern: { hour: number; label: string; average: number; count: number }[];
   trendForecast: string;
   popularityPercentile: number;
+  confidenceScore: number;
+  confidenceLevel: "low" | "moderate" | "high";
+  confidenceLabel: string;
+  slotSampleCount: number;
+  dataDays: number;
+  baselineSource: "5min" | "10min" | "hour" | "weekday" | "recency" | null;
+  learningNote: string | null;
 }
 
 export interface ParkRecommendations {
@@ -172,6 +196,7 @@ export interface ParkRecommendations {
   trendingUpFast: RideRecommendation[];
   expectedToRiseSoon: RideRecommendation[];
   byRideId: Record<number, RideIntelligence>;
+  dataMaturity: DataMaturityMetrics;
   generatedAt: string;
 }
 

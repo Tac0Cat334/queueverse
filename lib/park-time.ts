@@ -108,3 +108,27 @@ export function formatParkDateLabel(reference = new Date()): string {
     day: "numeric",
   });
 }
+
+/** 0 = Sunday … 6 = Saturday in park local time */
+export function getParkDayOfWeek(date: Date | string): number {
+  const weekday = new Date(date).toLocaleDateString("en-US", {
+    timeZone: PARK_TIMEZONE,
+    weekday: "short",
+  });
+  const map: Record<string, number> = {
+    Sun: 0,
+    Mon: 1,
+    Tue: 2,
+    Wed: 3,
+    Thu: 4,
+    Fri: 5,
+    Sat: 6,
+  };
+  return map[weekday] ?? 0;
+}
+
+/** YYYY-MM-DD key in park timezone for deduplicating calendar days */
+export function getParkDateKey(date: Date | string): string {
+  const parts = getParkParts(new Date(date));
+  return `${parts.year}-${String(parts.month).padStart(2, "0")}-${String(parts.day).padStart(2, "0")}`;
+}

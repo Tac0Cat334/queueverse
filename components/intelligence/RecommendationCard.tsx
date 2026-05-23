@@ -3,6 +3,7 @@
 import Link from "next/link";
 import type { RideRecommendation } from "@/types";
 import { OpportunityBadge } from "./OpportunityBadge";
+import { ConfidenceBadge } from "./ConfidenceBadge";
 import { TrendBadge } from "../TrendBadge";
 
 interface RecommendationCardProps {
@@ -48,6 +49,10 @@ export function RecommendationCard({ recommendation, rank }: RecommendationCardP
           </p>
           <div className="mt-1.5 flex flex-col items-end gap-1">
             <OpportunityBadge score={recommendation.opportunityScore} />
+            <ConfidenceBadge
+              score={recommendation.confidenceScore}
+              label={recommendation.confidenceLabel}
+            />
             <TrendBadge
               trend={recommendation.trend.trend}
               label={recommendation.trend.label}

@@ -17,6 +17,7 @@ import { RelativeTime } from "./RelativeTime";
 import { FavoriteButton } from "./FavoriteButton";
 import { TrendBadge } from "./TrendBadge";
 import { OpportunityBadge } from "./intelligence/OpportunityBadge";
+import { ConfidenceBadge } from "./intelligence/ConfidenceBadge";
 import { useAutoRefresh } from "@/hooks/use-auto-refresh";
 import { useFavorites } from "@/hooks/use-favorites";
 import { REFRESH_INTERVAL_MS } from "@/lib/constants";
@@ -173,13 +174,24 @@ export function RideDetail({ ride: initialRide }: RideDetailProps) {
               <div className="mt-3 flex flex-wrap items-center gap-2">
                 <TrendBadge trend={trend.trend} label={trend.label} change={trend.change} />
                 {intelligence.isOpen && (
-                  <OpportunityBadge score={intelligence.opportunityScore} size="md" />
+                  <>
+                    <OpportunityBadge score={intelligence.opportunityScore} size="md" />
+                    <ConfidenceBadge
+                      score={intelligence.confidenceScore}
+                      label={intelligence.confidenceLabel}
+                    />
+                  </>
                 )}
               </div>
             )}
             {intelligence.comparisonMessage && ride.is_open && (
               <p className="mt-2 text-xs text-[var(--fg-secondary)]">
                 {intelligence.comparisonMessage}
+              </p>
+            )}
+            {intelligence.learningNote && (
+              <p className="mt-1 text-[11px] text-[var(--fg-muted)]">
+                {intelligence.learningNote}
               </p>
             )}
           </div>
@@ -290,6 +302,8 @@ export function RideDetail({ ride: initialRide }: RideDetailProps) {
             {intelligence.recommendationLabel}
             {intelligence.historicalAverage !== null &&
               ` · Typical now: ${intelligence.historicalAverage} min`}
+            {intelligence.baselineSource === "weekday" &&
+              ` · ${intelligence.learningNote ?? "Weekday pattern"}`}
           </p>
         </div>
       )}
