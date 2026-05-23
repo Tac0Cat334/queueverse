@@ -9,6 +9,7 @@ import { RideCard, RideCardSkeleton } from "./RideCard";
 import { DataAttribution } from "./DataAttribution";
 import { computeParkIntelligence } from "@/lib/park-intelligence";
 import { sortRides } from "@/lib/analytics";
+import { getLatestUpdateTime } from "@/lib/queue-times";
 import { REFRESH_INTERVAL_MS } from "@/lib/constants";
 import { useAutoRefresh } from "@/hooks/use-auto-refresh";
 import { useDebouncedValue } from "@/hooks/use-auto-refresh";
@@ -16,7 +17,6 @@ import { cn } from "@/utils/wait-time";
 
 interface DashboardProps {
   initialRides: RideWithLiveData[];
-  initialFetchedAt: string;
 }
 
 const sortOptions: { value: SortOption; label: string }[] = [
@@ -26,9 +26,8 @@ const sortOptions: { value: SortOption; label: string }[] = [
   { value: "open", label: "Open" },
 ];
 
-export function Dashboard({ initialRides, initialFetchedAt }: DashboardProps) {
+export function Dashboard({ initialRides }: DashboardProps) {
   const [rides, setRides] = useState(initialRides);
-  const [lastCheckedAt, setLastCheckedAt] = useState(initialFetchedAt);
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<SortOption>("highest");
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -56,7 +55,6 @@ export function Dashboard({ initialRides, initialFetchedAt }: DashboardProps) {
 
       const data = await liveRes.json();
       if (data.rides) setRides(data.rides);
-      setLastCheckedAt(data.fetchedAt ?? new Date().toISOString());
     } finally {
       setIsRefreshing(false);
     }
@@ -68,6 +66,7 @@ export function Dashboard({ initialRides, initialFetchedAt }: DashboardProps) {
 
   useAutoRefresh(refresh, REFRESH_INTERVAL_MS);
 
+  const lastUpdated = useMemo(() => getLatestUpdateTime(rides), [rides]);
   const intel = useMemo(() => computeParkIntelligence(rides), [rides]);
 
   const filteredRides = useMemo(() => {
@@ -85,7 +84,7 @@ export function Dashboard({ initialRides, initialFetchedAt }: DashboardProps) {
 
   return (
     <>
-      <Hero lastCheckedAt={lastCheckedAt} />
+      <Hero lastUpdated={lastUpdated} />
       <ParkSummary intel={intel} />
 
       <section className="mx-auto mt-10 max-w-5xl px-4 pb-16 sm:px-6" id="rides">
@@ -138,7 +137,6 @@ export function Dashboard({ initialRides, initialFetchedAt }: DashboardProps) {
                 key={ride.ride_id}
                 ride={ride}
                 insight={insights[ride.ride_id]}
-                lastCheckedAt={lastCheckedAt}
               />
             ))
           )}

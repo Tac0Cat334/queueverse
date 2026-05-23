@@ -4,10 +4,10 @@ import { BRAND } from "@/lib/brand";
 import { RelativeTime } from "./RelativeTime";
 
 interface HeroProps {
-  lastCheckedAt: string | null;
+  lastUpdated: string | null;
 }
 
-export function Hero({ lastCheckedAt }: HeroProps) {
+export function Hero({ lastUpdated }: HeroProps) {
   return (
     <section className="px-4 pt-12 pb-8 sm:px-6 sm:pt-16">
       <div className="mx-auto max-w-5xl">
@@ -21,9 +21,9 @@ export function Hero({ lastCheckedAt }: HeroProps) {
           {BRAND.tagline}. {BRAND.subtitle}
         </p>
 
-        {lastCheckedAt && (
+        {lastUpdated && (
           <p className="label mt-5">
-            <RelativeTime date={lastCheckedAt} />
+            <RelativeTime date={lastUpdated} />
           </p>
         )}
       </div>

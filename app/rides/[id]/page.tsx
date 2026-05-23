@@ -41,12 +41,7 @@ export default async function RidePage({ params }: PageProps) {
 
   if (!ride) notFound();
 
-  return (
-    <RideDetail
-      ride={ride}
-      initialFetchedAt={new Date().toISOString()}
-    />
-  );
+  return <RideDetail ride={ride} />;
 }
 
 export const revalidate = 60;

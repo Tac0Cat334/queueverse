@@ -5,12 +5,7 @@ import { fetchLiveQueueTimes, flattenRides } from "@/lib/queue-times";
 async function DashboardContent() {
   const data = await fetchLiveQueueTimes();
   const rides = flattenRides(data);
-  return (
-    <Dashboard
-      initialRides={rides}
-      initialFetchedAt={new Date().toISOString()}
-    />
-  );
+  return <Dashboard initialRides={rides} />;
 }
 
 export default function HomePage() {

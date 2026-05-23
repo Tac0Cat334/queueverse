@@ -14,7 +14,6 @@ import { format } from "date-fns";
 
 interface RideDetailProps {
   ride: RideWithLiveData;
-  initialFetchedAt: string;
 }
 
 const rangeOptions: { value: TimeRange; label: string }[] = [
@@ -23,9 +22,8 @@ const rangeOptions: { value: TimeRange; label: string }[] = [
   { value: "30d", label: "30 days" },
 ];
 
-export function RideDetail({ ride: initialRide, initialFetchedAt }: RideDetailProps) {
+export function RideDetail({ ride: initialRide }: RideDetailProps) {
   const [ride, setRide] = useState(initialRide);
-  const [lastCheckedAt, setLastCheckedAt] = useState(initialFetchedAt);
   const [range, setRange] = useState<TimeRange>("today");
   const [records, setRecords] = useState<WaitTimeRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -41,7 +39,6 @@ export function RideDetail({ ride: initialRide, initialFetchedAt }: RideDetailPr
         (r: RideWithLiveData) => r.ride_id === initialRide.ride_id
       );
       if (updated) setRide(updated);
-      setLastCheckedAt(data.fetchedAt ?? new Date().toISOString());
     } catch {
       // keep showing last known data
     }
@@ -115,7 +112,7 @@ export function RideDetail({ ride: initialRide, initialFetchedAt }: RideDetailPr
               {ride.is_open ? "Open" : "Closed"}
             </span>
             <RelativeTime
-              date={lastCheckedAt}
+              date={ride.last_updated}
               className="mt-1 block text-xs text-[var(--fg-muted)]"
             />
           </div>
