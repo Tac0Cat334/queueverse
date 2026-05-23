@@ -1,84 +1,8 @@
 import type { ChartDataPoint, RideWithLiveData, WaitTimeRecord } from "@/types";
 import { formatParkTime, isWithinParkDay } from "@/lib/park-time";
+import { roundToFiveMinutes } from "@/lib/sync-snapshot";
 
-const STORAGE_PREFIX = "qv-daily-chart-";
 const BUCKET_MS = 5 * 60 * 1000;
-
-function parkDateKey(reference = new Date()): string {
-  return reference.toLocaleDateString("en-CA", {
-    timeZone: "America/New_York",
-  });
-}
-
-function roundToFiveMinutes(date: Date): Date {
-  const rounded = new Date(date);
-  rounded.setSeconds(0, 0);
-  rounded.setMilliseconds(0);
-  rounded.setMinutes(Math.floor(rounded.getMinutes() / 5) * 5);
-  return rounded;
-}
-
-function bufferKey(rideId: number, reference = new Date()): string {
-  return `${STORAGE_PREFIX}${rideId}-${parkDateKey(reference)}`;
-}
-
-function readBuffer(key: string): ChartDataPoint[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const raw = localStorage.getItem(key);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
-function writeBuffer(key: string, points: ChartDataPoint[]) {
-  if (typeof window === "undefined") return;
-  localStorage.setItem(key, JSON.stringify(points));
-}
-
-/** Persist a 5-min snapshot locally so the chart grows through the day. */
-export function appendDailySnapshot(
-  rideId: number,
-  waitTime: number,
-  isOpen: boolean,
-  timestamp = new Date()
-): ChartDataPoint[] {
-  if (typeof window === "undefined" || !isOpen) return getDailyBuffer(rideId);
-
-  const rounded = roundToFiveMinutes(timestamp);
-  const key = bufferKey(rideId, timestamp);
-  const points = readBuffer(key);
-  const point: ChartDataPoint = {
-    timestamp: rounded.toISOString(),
-    wait_time: waitTime,
-    label: formatParkTime(rounded),
-  };
-
-  const bucket = rounded.getTime();
-  const idx = points.findIndex(
-    (p) => Math.abs(new Date(p.timestamp).getTime() - bucket) < BUCKET_MS / 2
-  );
-
-  if (idx >= 0) {
-    points[idx] = point;
-  } else {
-    points.push(point);
-  }
-
-  points.sort(
-    (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-  );
-
-  writeBuffer(key, points);
-  return points;
-}
-
-export function getDailyBuffer(rideId: number, reference = new Date()): ChartDataPoint[] {
-  return readBuffer(bufferKey(rideId, reference));
-}
 
 function toChartPoint(record: WaitTimeRecord): ChartDataPoint | null {
   if (!record.is_open) return null;
@@ -102,36 +26,43 @@ function mergeChartPoints(points: ChartDataPoint[]): ChartDataPoint[] {
     .map(([, point]) => point);
 }
 
-/** Merge Supabase history + local buffer into today's chart line. */
+function hasBucket(points: ChartDataPoint[], bucketMs: number): boolean {
+  return points.some(
+    (p) =>
+      Math.abs(
+        roundToFiveMinutes(new Date(p.timestamp)).getTime() - bucketMs
+      ) < BUCKET_MS / 2
+  );
+}
+
+/** Build today's chart purely from server-collected history (Supabase). */
 export function buildTodayChartData(
   records: WaitTimeRecord[],
-  rideId: number,
   liveRide?: Pick<RideWithLiveData, "wait_time" | "is_open" | "last_updated">
 ): ChartDataPoint[] {
   const now = new Date();
 
-  const fromDb = records
+  const points = records
     .filter((r) => isWithinParkDay(r.timestamp, now))
     .map(toChartPoint)
     .filter((p): p is ChartDataPoint => p !== null);
 
-  const fromBuffer = getDailyBuffer(rideId, now);
+  let merged = mergeChartPoints(points);
 
-  let merged = mergeChartPoints([...fromDb, ...fromBuffer]);
-
+  // Only add live reading if this 5-min bucket isn't in the database yet
   if (liveRide?.is_open) {
-    merged = mergeChartPoints([
-      ...merged,
-      ...appendDailySnapshot(rideId, liveRide.wait_time, true, now),
-    ]);
+    const bucket = roundToFiveMinutes(now).getTime();
+    if (!hasBucket(merged, bucket)) {
+      merged = mergeChartPoints([
+        ...merged,
+        {
+          timestamp: new Date(bucket).toISOString(),
+          wait_time: liveRide.wait_time,
+          label: `${formatParkTime(bucket)} (live)`,
+        },
+      ]);
+    }
   }
 
   return merged;
-}
-
-export function countTodaySnapshots(
-  records: WaitTimeRecord[],
-  rideId: number
-): number {
-  return buildTodayChartData(records, rideId).length;
 }

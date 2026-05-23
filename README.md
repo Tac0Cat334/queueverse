@@ -37,21 +37,24 @@ See `.env.example` for all required keys (Supabase, Queue-Times, cron secret).
 5. Deploy.
 6. In Resend, set the webhook URL to `https://YOUR-VERCEL-URL/api/webhooks/resend` with event `email.received`.
 
-### Historical data sync (free, every 5 minutes)
+### Historical data sync (required for daily charts)
 
-Vercel **Hobby** only allows daily crons, so use a free external scheduler instead:
+Daily charts load **all points collected today** from Supabase. Data must sync every 5 minutes **without anyone on the site**.
 
-1. Sign up at [cron-job.org](https://console.cron-job.org) (free).
-2. **Create cron job**:
-   - **URL:** `https://YOUR-VERCEL-URL/api/cron/sync-wait-times`
-   - **Schedule:** every 5 minutes (`*/5 * * * *`)
-   - **Request method:** GET
-3. Under **Advanced** → **Headers**, add:
-   - **Name:** `Authorization`
-   - **Value:** `Bearer YOUR_CRON_SECRET` (same value as `CRON_SECRET` in Vercel)
-4. Save and enable the job.
+**Option A — GitHub Actions (recommended, already in repo)**
 
-This keeps Supabase filled with wait-time history without a Vercel Pro plan.
+1. GitHub → your repo → **Settings** → **Secrets and variables** → **Actions**
+2. Add secret: `CRON_SECRET` (same value as in Vercel)
+3. The workflow `.github/workflows/sync-wait-times.yml` runs every 5 minutes automatically
+
+**Option B — cron-job.org (backup)**
+
+1. Sign up at [cron-job.org](https://console.cron-job.org)
+2. URL: `https://queueverse.vercel.app/api/cron/sync-wait-times`
+3. Schedule: every 5 minutes
+4. Header: `Authorization: Bearer YOUR_CRON_SECRET`
+
+After sync runs during park hours, opening any ride at 1 PM shows the full chart from opening through 1 PM — no need to leave a page open.
 
 ## Data
 

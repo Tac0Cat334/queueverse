@@ -95,7 +95,7 @@ export function RideDetail({ ride: initialRide }: RideDetailProps) {
   }, [historyRecords, todayRecords]);
 
   const todayChartData = useMemo(
-    () => buildTodayChartData(allRecords, ride.ride_id, ride),
+    () => buildTodayChartData(allRecords, ride),
     [allRecords, ride]
   );
 
@@ -228,7 +228,7 @@ export function RideDetail({ ride: initialRide }: RideDetailProps) {
           Today&apos;s wait times
         </h2>
         <p className="mb-4 text-xs text-[var(--fg-muted)]">
-          {formatParkDateLabel()} · New point every 5 min · Resets at midnight ET
+          {formatParkDateLabel()} · Full day history · Updates every 5 min
         </p>
         {loading ? (
           <div className="skeleton h-72 rounded-2xl" />

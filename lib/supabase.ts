@@ -56,15 +56,22 @@ export async function getRideByRideId(rideId: number): Promise<Ride | null> {
 
 export async function getWaitTimesForRide(
   rideId: number,
-  since: Date
+  since: Date,
+  until?: Date
 ): Promise<WaitTimeRecord[]> {
   const supabase = getSupabase();
-  const { data, error } = await supabase
+  let query = supabase
     .from("wait_times")
     .select("*")
     .eq("ride_id", rideId)
     .gte("timestamp", since.toISOString())
     .order("timestamp", { ascending: true });
+
+  if (until) {
+    query = query.lt("timestamp", until.toISOString());
+  }
+
+  const { data, error } = await query;
 
   if (error) throw error;
   return data ?? [];

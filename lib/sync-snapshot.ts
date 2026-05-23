@@ -12,27 +12,36 @@ export function roundToFiveMinutes(date: Date): Date {
 export async function syncWaitTimeSnapshots(
   rides: RideWithLiveData[],
   timestamp = roundToFiveMinutes(new Date())
-): Promise<void> {
+): Promise<{ saved: number }> {
   const supabase = createServiceClient();
+  const ts = timestamp.toISOString();
 
-  for (const ride of rides) {
-    await supabase.from("rides").upsert(
-      {
-        ride_id: ride.ride_id,
-        name: ride.name,
-        land: ride.land,
-      },
-      { onConflict: "ride_id" }
-    );
+  await Promise.all(
+    rides.map((ride) =>
+      supabase.from("rides").upsert(
+        {
+          ride_id: ride.ride_id,
+          name: ride.name,
+          land: ride.land,
+        },
+        { onConflict: "ride_id" }
+      )
+    )
+  );
 
-    await supabase.from("wait_times").upsert(
-      {
-        ride_id: ride.ride_id,
-        wait_time: ride.wait_time,
-        is_open: ride.is_open,
-        timestamp: timestamp.toISOString(),
-      },
-      { onConflict: "ride_id,timestamp", ignoreDuplicates: true }
-    );
-  }
+  await Promise.all(
+    rides.map((ride) =>
+      supabase.from("wait_times").upsert(
+        {
+          ride_id: ride.ride_id,
+          wait_time: ride.wait_time,
+          is_open: ride.is_open,
+          timestamp: ts,
+        },
+        { onConflict: "ride_id,timestamp", ignoreDuplicates: true }
+      )
+    )
+  );
+
+  return { saved: rides.length };
 }

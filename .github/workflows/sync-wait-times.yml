@@ -1,0 +1,17 @@
+name: Sync wait times
+
+on:
+  schedule:
+    # Every 5 minutes — keeps Supabase filled for daily charts
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Sync Epic Universe wait times
+        run: |
+          curl -sf --retry 2 --retry-delay 10 \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            "https://queueverse.vercel.app/api/cron/sync-wait-times"
