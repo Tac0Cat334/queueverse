@@ -3,9 +3,11 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
-import type { RideWithLiveData, ChartDataPoint, WaitTimeRecord } from "@/types";
+import type { RideWithLiveData, WaitTimeRecord } from "@/types";
 import { DailyWaitChart, WeeklyPatternChart } from "./WaitChart";
-import { computeRideAnalytics, filterRecordsByRange, computeLiveTrend } from "@/lib/analytics";
+import { computeRideAnalytics, computeLiveTrend } from "@/lib/analytics";
+import { buildTodayChartData, countTodaySnapshots } from "@/lib/daily-chart";
+import { formatParkDateLabel } from "@/lib/park-time";
 import { getWaitLevel, getWaitLevelClass, formatWaitTime, cn } from "@/utils/wait-time";
 import { RelativeTime } from "./RelativeTime";
 import { FavoriteButton } from "./FavoriteButton";
@@ -13,7 +15,6 @@ import { TrendBadge } from "./TrendBadge";
 import { useAutoRefresh } from "@/hooks/use-auto-refresh";
 import { useFavorites } from "@/hooks/use-favorites";
 import { REFRESH_INTERVAL_MS } from "@/lib/constants";
-import { format } from "date-fns";
 
 interface RideDetailProps {
   ride: RideWithLiveData;
@@ -21,7 +22,8 @@ interface RideDetailProps {
 
 export function RideDetail({ ride: initialRide }: RideDetailProps) {
   const [ride, setRide] = useState(initialRide);
-  const [records, setRecords] = useState<WaitTimeRecord[]>([]);
+  const [todayRecords, setTodayRecords] = useState<WaitTimeRecord[]>([]);
+  const [historyRecords, setHistoryRecords] = useState<WaitTimeRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [configured, setConfigured] = useState(true);
   const { isFavorite, toggleFavorite } = useFavorites();
@@ -41,46 +43,66 @@ export function RideDetail({ ride: initialRide }: RideDetailProps) {
     }
   }, [initialRide.ride_id]);
 
-  useAutoRefresh(refreshLive, REFRESH_INTERVAL_MS);
+  const fetchHistory = useCallback(async (showLoading = false) => {
+    if (showLoading) setLoading(true);
+    try {
+      const [todayRes, historyRes] = await Promise.all([
+        fetch(`/api/history?rideId=${ride.ride_id}&range=today`, {
+          cache: "no-store",
+        }),
+        fetch(`/api/history?rideId=${ride.ride_id}&range=30d`, {
+          cache: "no-store",
+        }),
+      ]);
 
-  useEffect(() => {
-    const fetchHistory = () => {
-      setLoading(true);
-      fetch(`/api/history?rideId=${ride.ride_id}&range=30d`, {
-        cache: "no-store",
-      })
-        .then((r) => r.json())
-        .then((d) => {
-          setRecords(d.records ?? []);
-          setConfigured(d.configured !== false);
-        })
-        .catch(() => setRecords([]))
-        .finally(() => setLoading(false));
-    };
+      const todayData = await todayRes.json();
+      const historyData = await historyRes.json();
 
-    fetchHistory();
-    const id = setInterval(fetchHistory, REFRESH_INTERVAL_MS);
-    return () => clearInterval(id);
+      setTodayRecords(todayData.records ?? []);
+      setHistoryRecords(historyData.records ?? []);
+      setConfigured(
+        todayData.configured !== false && historyData.configured !== false
+      );
+    } catch {
+      setTodayRecords([]);
+      setHistoryRecords([]);
+    } finally {
+      if (showLoading) setLoading(false);
+    }
   }, [ride.ride_id]);
 
+  const refreshAll = useCallback(async () => {
+    await Promise.all([refreshLive(), fetchHistory(false)]);
+  }, [refreshLive, fetchHistory]);
+
+  useEffect(() => {
+    fetchHistory(true);
+  }, [fetchHistory]);
+
+  useAutoRefresh(refreshAll, REFRESH_INTERVAL_MS);
+
   const analytics = useMemo(
-    () => computeRideAnalytics(records, "30d"),
-    [records]
+    () => computeRideAnalytics(historyRecords, "30d"),
+    [historyRecords]
   );
 
-  const todayChartData: ChartDataPoint[] = useMemo(() => {
-    return filterRecordsByRange(records, "today")
-      .filter((r) => r.is_open)
-      .map((r) => ({
-        timestamp: r.timestamp,
-        wait_time: r.wait_time,
-        label: format(new Date(r.timestamp), "h:mm a"),
-      }));
-  }, [records]);
+  const todayChartData = useMemo(
+    () => buildTodayChartData(todayRecords, ride),
+    [todayRecords, ride]
+  );
+
+  const todaySnapshotCount = useMemo(
+    () => countTodaySnapshots(todayRecords),
+    [todayRecords]
+  );
 
   const trend = useMemo(
-    () => computeLiveTrend(records, ride.is_open ? ride.wait_time : undefined),
-    [records, ride.wait_time, ride.is_open]
+    () =>
+      computeLiveTrend(
+        [...historyRecords, ...todayRecords],
+        ride.is_open ? ride.wait_time : undefined
+      ),
+    [historyRecords, todayRecords, ride.wait_time, ride.is_open]
   );
 
   const level = getWaitLevel(ride.wait_time, ride.is_open);
@@ -201,7 +223,7 @@ export function RideDetail({ ride: initialRide }: RideDetailProps) {
           Today&apos;s wait times
         </h2>
         <p className="mb-4 text-xs text-[var(--fg-muted)]">
-          Updates automatically every 5 minutes
+          {formatParkDateLabel()} · New point every 5 min · Resets at midnight ET
         </p>
         {loading ? (
           <div className="skeleton h-72 rounded-2xl" />
@@ -210,6 +232,7 @@ export function RideDetail({ ride: initialRide }: RideDetailProps) {
             data={todayChartData}
             currentWait={ride.is_open ? ride.wait_time : undefined}
             isOpen={ride.is_open}
+            snapshotCount={todaySnapshotCount}
           />
         )}
       </div>

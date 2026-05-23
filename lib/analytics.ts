@@ -10,18 +10,17 @@ import type {
 import { formatHourLabel, formatHourMinute } from "@/utils/wait-time";
 import { WAIT_THRESHOLDS } from "@/lib/constants";
 import {
-  startOfDay,
   subDays,
-  isAfter,
   getHours,
   getMinutes,
 } from "date-fns";
+import { getParkStartOfDay } from "@/lib/park-time";
 
 export function getTimeRangeStart(range: "today" | "7d" | "30d"): Date {
   const now = new Date();
   switch (range) {
     case "today":
-      return startOfDay(now);
+      return getParkStartOfDay(now);
     case "7d":
       return subDays(now, 7);
     case "30d":
@@ -34,7 +33,10 @@ export function filterRecordsByRange(
   range: "today" | "7d" | "30d"
 ): WaitTimeRecord[] {
   const start = getTimeRangeStart(range);
-  return records.filter((r) => isAfter(new Date(r.timestamp), start));
+  return records.filter((r) => {
+    const ts = new Date(r.timestamp).getTime();
+    return ts >= start.getTime();
+  });
 }
 
 function bucketByHour(records: WaitTimeRecord[]) {
@@ -245,9 +247,9 @@ export function computeRideAnalytics(
     (r) => r.is_open
   );
 
-  const todayStart = startOfDay(new Date());
+  const todayStart = getParkStartOfDay(new Date());
   const todayRecords = records.filter(
-    (r) => r.is_open && isAfter(new Date(r.timestamp), todayStart)
+    (r) => r.is_open && new Date(r.timestamp).getTime() >= todayStart.getTime()
   );
 
   const averageWaitToday =

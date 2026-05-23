@@ -11,9 +11,13 @@ import {
   ReferenceDot,
   ReferenceLine,
 } from "recharts";
-import { format } from "date-fns";
 import type { ChartDataPoint } from "@/types";
 import { useChartColors } from "./ThemeProvider";
+import {
+  formatParkTime,
+  getParkDayChartWindow,
+  formatParkDateLabel,
+} from "@/lib/park-time";
 
 interface ChartTooltipProps {
   active?: boolean;
@@ -45,33 +49,36 @@ interface DailyWaitChartProps {
   data: ChartDataPoint[];
   currentWait?: number;
   isOpen?: boolean;
+  snapshotCount?: number;
 }
 
-export function DailyWaitChart({ data, currentWait, isOpen }: DailyWaitChartProps) {
+export function DailyWaitChart({
+  data,
+  currentWait,
+  isOpen,
+  snapshotCount = 0,
+}: DailyWaitChartProps) {
   const colors = useChartColors();
+  const { chartStartMs, visibleEndMs } = getParkDayChartWindow();
+  const parkDateLabel = formatParkDateLabel();
 
   if (data.length === 0) {
     return (
-      <div className="card flex h-64 items-center justify-center px-6 text-center">
+      <div className="card flex h-64 flex-col items-center justify-center gap-2 px-6 text-center">
         <p className="text-sm text-[var(--fg-muted)]">
           Today&apos;s graph builds as data is collected every 5 minutes.
         </p>
-      </div>
-    );
-  }
-
-  if (data.length === 1) {
-    return (
-      <div className="card flex h-64 flex-col items-center justify-center gap-2">
-        <p className="metric text-4xl font-semibold">{data[0].wait_time} min</p>
-        <p className="text-xs text-[var(--fg-muted)]">First snapshot today</p>
+        <p className="text-xs text-[var(--fg-muted)]">
+          {parkDateLabel} · Park time (ET)
+        </p>
       </div>
     );
   }
 
   const chartData = data.map((d) => ({
     ...d,
-    displayLabel: format(new Date(d.timestamp), "h:mm a"),
+    timeMs: new Date(d.timestamp).getTime(),
+    displayLabel: d.label,
   }));
 
   const min = Math.min(...chartData.map((d) => d.wait_time));
@@ -80,12 +87,19 @@ export function DailyWaitChart({ data, currentWait, isOpen }: DailyWaitChartProp
 
   return (
     <div className="card p-4 sm:p-6">
-      <div className="mb-4 flex flex-wrap gap-4 text-xs text-[var(--fg-muted)]">
-        <span>Low {min}m</span>
-        <span>Peak {max}m</span>
-        {isOpen && currentWait !== undefined && (
-          <span className="text-[var(--fg-secondary)]">Live {currentWait}m</span>
-        )}
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap gap-4 text-xs text-[var(--fg-muted)]">
+          <span>Low {min}m</span>
+          <span>Peak {max}m</span>
+          {isOpen && currentWait !== undefined && (
+            <span className="text-[var(--fg-secondary)]">Live {currentWait}m</span>
+          )}
+        </div>
+        <span className="text-[10px] text-[var(--fg-muted)]">
+          {snapshotCount > 0
+            ? `${snapshotCount} snapshot${snapshotCount === 1 ? "" : "s"} today`
+            : parkDateLabel}
+        </span>
       </div>
 
       <ResponsiveContainer width="100%" height={280}>
@@ -98,7 +112,10 @@ export function DailyWaitChart({ data, currentWait, isOpen }: DailyWaitChartProp
           </defs>
           <CartesianGrid stroke={colors.grid} strokeDasharray="3 3" vertical={false} />
           <XAxis
-            dataKey="displayLabel"
+            type="number"
+            dataKey="timeMs"
+            domain={[chartStartMs, Math.max(visibleEndMs, chartStartMs + 60 * 60 * 1000)]}
+            tickFormatter={(ms) => formatParkTime(ms)}
             tick={{ fill: colors.tick, fontSize: 11 }}
             tickLine={false}
             axisLine={false}
@@ -130,13 +147,14 @@ export function DailyWaitChart({ data, currentWait, isOpen }: DailyWaitChartProp
             stroke={colors.line}
             strokeWidth={2.5}
             fill="url(#dailyFill)"
-            dot={false}
+            dot={chartData.length <= 12}
             activeDot={{ r: 5, fill: colors.line, strokeWidth: 0 }}
             animationDuration={900}
             animationEasing="ease-out"
+            isAnimationActive
           />
           <ReferenceDot
-            x={lastPoint.displayLabel}
+            x={lastPoint.timeMs}
             y={lastPoint.wait_time}
             r={6}
             fill={colors.line}
@@ -146,6 +164,9 @@ export function DailyWaitChart({ data, currentWait, isOpen }: DailyWaitChartProp
           />
         </AreaChart>
       </ResponsiveContainer>
+      <p className="mt-3 text-center text-[10px] text-[var(--fg-muted)]">
+        Resets at midnight · {parkDateLabel}
+      </p>
     </div>
   );
 }
@@ -238,5 +259,4 @@ export function WeeklyPatternChart({
   );
 }
 
-// Legacy export for any remaining usage
 export { DailyWaitChart as WaitChart };
