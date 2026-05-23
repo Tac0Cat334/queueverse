@@ -1,14 +1,6 @@
 import { NextResponse } from "next/server";
 import { fetchLiveQueueTimes, flattenRides } from "@/lib/queue-times";
-import { createServiceClient } from "@/lib/supabase";
-
-function roundToFiveMinutes(date: Date): Date {
-  const rounded = new Date(date);
-  rounded.setSeconds(0, 0);
-  const minutes = rounded.getMinutes();
-  rounded.setMinutes(Math.floor(minutes / 5) * 5);
-  return rounded;
-}
+import { roundToFiveMinutes, syncWaitTimeSnapshots } from "@/lib/sync-snapshot";
 
 export async function GET(request: Request) {
   const authHeader = request.headers.get("authorization");
@@ -30,60 +22,12 @@ export async function GET(request: Request) {
     const rides = flattenRides(data);
     const timestamp = roundToFiveMinutes(new Date());
 
-    const supabase = createServiceClient();
-    let inserted = 0;
-    let updated = 0;
-    let skipped = 0;
-
-    for (const ride of rides) {
-      const { data: existingRide } = await supabase
-        .from("rides")
-        .select("id, name, land")
-        .eq("ride_id", ride.ride_id)
-        .single();
-
-      if (existingRide) {
-        if (
-          existingRide.name !== ride.name ||
-          existingRide.land !== ride.land
-        ) {
-          await supabase
-            .from("rides")
-            .update({ name: ride.name, land: ride.land })
-            .eq("ride_id", ride.ride_id);
-          updated++;
-        }
-      } else {
-        await supabase.from("rides").insert({
-          ride_id: ride.ride_id,
-          name: ride.name,
-          land: ride.land,
-        });
-        inserted++;
-      }
-
-      const { error: waitError } = await supabase.from("wait_times").upsert(
-        {
-          ride_id: ride.ride_id,
-          wait_time: ride.wait_time,
-          is_open: ride.is_open,
-          timestamp: timestamp.toISOString(),
-        },
-        { onConflict: "ride_id,timestamp", ignoreDuplicates: true }
-      );
-
-      if (waitError?.code === "23505") {
-        skipped++;
-      }
-    }
+    await syncWaitTimeSnapshots(rides, timestamp);
 
     return NextResponse.json({
       success: true,
       timestamp: timestamp.toISOString(),
       ridesProcessed: rides.length,
-      ridesInserted: inserted,
-      ridesUpdated: updated,
-      duplicatesSkipped: skipped,
     });
   } catch (error) {
     console.error("Cron sync failed:", error);

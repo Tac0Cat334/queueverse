@@ -6,10 +6,12 @@ import {
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
+  Line,
+  LineChart,
   Area,
   AreaChart,
-  ReferenceDot,
   ReferenceLine,
+  ReferenceDot,
 } from "recharts";
 import type { ChartDataPoint } from "@/types";
 import { useChartColors } from "./ThemeProvider";
@@ -83,7 +85,6 @@ export function DailyWaitChart({
 
   const min = Math.min(...chartData.map((d) => d.wait_time));
   const max = Math.max(...chartData.map((d) => d.wait_time));
-  const lastPoint = chartData[chartData.length - 1];
 
   return (
     <div className="card p-4 sm:p-6">
@@ -103,13 +104,7 @@ export function DailyWaitChart({
       </div>
 
       <ResponsiveContainer width="100%" height={280}>
-        <AreaChart data={chartData} margin={{ top: 8, right: 8, left: -16, bottom: 0 }}>
-          <defs>
-            <linearGradient id="dailyFill" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor={colors.line} stopOpacity={0.18} />
-              <stop offset="100%" stopColor={colors.line} stopOpacity={0} />
-            </linearGradient>
-          </defs>
+        <LineChart data={chartData} margin={{ top: 8, right: 12, left: -16, bottom: 0 }}>
           <CartesianGrid stroke={colors.grid} strokeDasharray="3 3" vertical={false} />
           <XAxis
             type="number"
@@ -120,6 +115,7 @@ export function DailyWaitChart({
             tickLine={false}
             axisLine={false}
             minTickGap={48}
+            scale="time"
           />
           <YAxis
             tick={{ fill: colors.tick, fontSize: 11 }}
@@ -141,28 +137,17 @@ export function DailyWaitChart({
               strokeOpacity={0.6}
             />
           )}
-          <Area
+          <Line
             type="monotone"
             dataKey="wait_time"
             stroke={colors.line}
             strokeWidth={2.5}
-            fill="url(#dailyFill)"
-            dot={chartData.length <= 12}
-            activeDot={{ r: 5, fill: colors.line, strokeWidth: 0 }}
-            animationDuration={900}
-            animationEasing="ease-out"
+            dot={{ r: 4, fill: colors.line, strokeWidth: 0 }}
+            activeDot={{ r: 6, fill: colors.line, strokeWidth: 0 }}
+            animationDuration={600}
             isAnimationActive
           />
-          <ReferenceDot
-            x={lastPoint.timeMs}
-            y={lastPoint.wait_time}
-            r={6}
-            fill={colors.line}
-            stroke={colors.tooltipBg}
-            strokeWidth={2}
-            ifOverflow="extendDomain"
-          />
-        </AreaChart>
+        </LineChart>
       </ResponsiveContainer>
       <p className="mt-3 text-center text-[10px] text-[var(--fg-muted)]">
         Resets at midnight · {parkDateLabel}

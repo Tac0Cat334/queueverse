@@ -6,7 +6,7 @@ import { ArrowLeft } from "lucide-react";
 import type { RideWithLiveData, WaitTimeRecord } from "@/types";
 import { DailyWaitChart, WeeklyPatternChart } from "./WaitChart";
 import { computeRideAnalytics, computeLiveTrend } from "@/lib/analytics";
-import { buildTodayChartData, countTodaySnapshots } from "@/lib/daily-chart";
+import { buildTodayChartData } from "@/lib/daily-chart";
 import { formatParkDateLabel } from "@/lib/park-time";
 import { getWaitLevel, getWaitLevelClass, formatWaitTime, cn } from "@/utils/wait-time";
 import { RelativeTime } from "./RelativeTime";
@@ -86,15 +86,20 @@ export function RideDetail({ ride: initialRide }: RideDetailProps) {
     [historyRecords]
   );
 
+  const allRecords = useMemo(() => {
+    const byKey = new Map<string, WaitTimeRecord>();
+    for (const record of [...historyRecords, ...todayRecords]) {
+      byKey.set(`${record.ride_id}-${record.timestamp}`, record);
+    }
+    return Array.from(byKey.values());
+  }, [historyRecords, todayRecords]);
+
   const todayChartData = useMemo(
-    () => buildTodayChartData(todayRecords, ride),
-    [todayRecords, ride]
+    () => buildTodayChartData(allRecords, ride.ride_id, ride),
+    [allRecords, ride]
   );
 
-  const todaySnapshotCount = useMemo(
-    () => countTodaySnapshots(todayRecords),
-    [todayRecords]
-  );
+  const todaySnapshotCount = todayChartData.length;
 
   const trend = useMemo(
     () =>
