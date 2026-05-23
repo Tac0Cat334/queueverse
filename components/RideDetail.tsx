@@ -3,12 +3,15 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
-import type { RideWithLiveData, TimeRange, ChartDataPoint, WaitTimeRecord } from "@/types";
-import { WaitChart, HourlyWaitChart } from "./WaitChart";
-import { computeRideAnalytics, filterRecordsByRange } from "@/lib/analytics";
+import type { RideWithLiveData, ChartDataPoint, WaitTimeRecord } from "@/types";
+import { DailyWaitChart, WeeklyPatternChart } from "./WaitChart";
+import { computeRideAnalytics, filterRecordsByRange, computeLiveTrend } from "@/lib/analytics";
 import { getWaitLevel, getWaitLevelClass, formatWaitTime, cn } from "@/utils/wait-time";
 import { RelativeTime } from "./RelativeTime";
+import { FavoriteButton } from "./FavoriteButton";
+import { TrendBadge } from "./TrendBadge";
 import { useAutoRefresh } from "@/hooks/use-auto-refresh";
+import { useFavorites } from "@/hooks/use-favorites";
 import { REFRESH_INTERVAL_MS } from "@/lib/constants";
 import { format } from "date-fns";
 
@@ -16,18 +19,12 @@ interface RideDetailProps {
   ride: RideWithLiveData;
 }
 
-const rangeOptions: { value: TimeRange; label: string }[] = [
-  { value: "today", label: "Today" },
-  { value: "7d", label: "7 days" },
-  { value: "30d", label: "30 days" },
-];
-
 export function RideDetail({ ride: initialRide }: RideDetailProps) {
   const [ride, setRide] = useState(initialRide);
-  const [range, setRange] = useState<TimeRange>("today");
   const [records, setRecords] = useState<WaitTimeRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [configured, setConfigured] = useState(true);
+  const { isFavorite, toggleFavorite } = useFavorites();
 
   const refreshLive = useCallback(async () => {
     try {
@@ -49,7 +46,9 @@ export function RideDetail({ ride: initialRide }: RideDetailProps) {
   useEffect(() => {
     const fetchHistory = () => {
       setLoading(true);
-      fetch(`/api/history?rideId=${ride.ride_id}&range=30d`)
+      fetch(`/api/history?rideId=${ride.ride_id}&range=30d`, {
+        cache: "no-store",
+      })
         .then((r) => r.json())
         .then((d) => {
           setRecords(d.records ?? []);
@@ -60,26 +59,32 @@ export function RideDetail({ ride: initialRide }: RideDetailProps) {
     };
 
     fetchHistory();
-    const id = setInterval(fetchHistory, 5 * 60 * 1000);
+    const id = setInterval(fetchHistory, REFRESH_INTERVAL_MS);
     return () => clearInterval(id);
   }, [ride.ride_id]);
 
   const analytics = useMemo(
-    () => computeRideAnalytics(records, range),
-    [records, range]
+    () => computeRideAnalytics(records, "30d"),
+    [records]
   );
 
-  const chartData: ChartDataPoint[] = useMemo(() => {
-    return filterRecordsByRange(records, range)
+  const todayChartData: ChartDataPoint[] = useMemo(() => {
+    return filterRecordsByRange(records, "today")
       .filter((r) => r.is_open)
       .map((r) => ({
         timestamp: r.timestamp,
         wait_time: r.wait_time,
-        label: format(new Date(r.timestamp), "MMM d, h:mm a"),
+        label: format(new Date(r.timestamp), "h:mm a"),
       }));
-  }, [records, range]);
+  }, [records]);
+
+  const trend = useMemo(
+    () => computeLiveTrend(records, ride.is_open ? ride.wait_time : undefined),
+    [records, ride.wait_time, ride.is_open]
+  );
 
   const level = getWaitLevel(ride.wait_time, ride.is_open);
+  const hasInsights = analytics.bestTimeToRide !== "Not enough data";
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6">
@@ -92,20 +97,38 @@ export function RideDetail({ ride: initialRide }: RideDetailProps) {
       </Link>
 
       <div className="card p-6 sm:p-8">
-        <p className="label">{ride.land}</p>
-        <h1 className="mt-1 text-2xl font-semibold tracking-tight text-[var(--fg)] sm:text-3xl">
-          {ride.name}
-        </h1>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="label">{ride.land}</p>
+            <h1 className="mt-1 text-2xl font-semibold tracking-tight text-[var(--fg)] sm:text-3xl">
+              {ride.name}
+            </h1>
+          </div>
+          <FavoriteButton
+            isFavorite={isFavorite(ride.ride_id)}
+            onToggle={() => toggleFavorite(ride.ride_id)}
+          />
+        </div>
 
         <div className="mt-8 flex items-end justify-between">
           <div>
             <p className="label">Current wait</p>
-            <p className={cn("metric mt-1 text-6xl font-semibold sm:text-7xl", getWaitLevelClass(level))}>
+            <p
+              className={cn(
+                "metric mt-1 text-6xl font-semibold sm:text-7xl",
+                getWaitLevelClass(level)
+              )}
+            >
               {!ride.is_open ? "—" : ride.wait_time}
             </p>
             <p className="mt-1 text-sm text-[var(--fg-muted)]">
               {formatWaitTime(ride.wait_time, ride.is_open)}
             </p>
+            {ride.is_open && (
+              <div className="mt-3">
+                <TrendBadge trend={trend.trend} label={trend.label} change={trend.change} />
+              </div>
+            )}
           </div>
           <div className="mb-2 text-right">
             <span className="text-sm text-[var(--fg-secondary)]">
@@ -125,63 +148,112 @@ export function RideDetail({ ride: initialRide }: RideDetailProps) {
         </p>
       )}
 
-      {analytics.bestTimeToRide !== "Not enough data" && (
-        <div className="card mt-4 p-5">
-          <p className="label">Best time to ride</p>
-          <p className="mt-1 text-sm leading-relaxed text-[var(--fg-secondary)]">
-            Historically lowest around{" "}
-            <span className="font-medium text-[var(--fg)]">{analytics.bestTimeToRide}</span>
-            {" "}with an average of{" "}
-            <span className="font-medium text-[var(--fg)]">{analytics.bestTimeAverageWait} min</span>.
+      {hasInsights && (
+        <div className="card mt-4 p-5 sm:p-6">
+          <p className="label mb-3">Ride intelligence</p>
+          <p className="text-sm leading-relaxed text-[var(--fg-secondary)]">
+            Historically,{" "}
+            <span className="font-medium text-[var(--fg)]">{ride.name}</span> has
+            its lowest average wait around{" "}
+            <span className="font-medium text-[var(--fg)]">
+              {analytics.bestTimeToRide}
+            </span>{" "}
+            ({analytics.bestTimeAverageWait} min avg). Peak crowds typically hit
+            around{" "}
+            <span className="font-medium text-[var(--fg)]">
+              {analytics.peakTimeToRide}
+            </span>{" "}
+            ({analytics.peakTimeAverageWait} min avg).
           </p>
+          <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <div className="rounded-xl bg-[var(--surface-hover)] p-3">
+              <p className="label">Best window</p>
+              <p className="metric mt-1 text-lg font-semibold">
+                {analytics.bestTimeToRide}
+              </p>
+            </div>
+            <div className="rounded-xl bg-[var(--surface-hover)] p-3">
+              <p className="label">Peak time</p>
+              <p className="metric mt-1 text-lg font-semibold">
+                {analytics.peakTimeToRide}
+              </p>
+            </div>
+            <div className="rounded-xl bg-[var(--surface-hover)] p-3">
+              <p className="label">Avg today</p>
+              <p className="metric mt-1 text-lg font-semibold">
+                {analytics.averageWaitToday}m
+              </p>
+            </div>
+            <div className="rounded-xl bg-[var(--surface-hover)] p-3">
+              <p className="label">Reliability</p>
+              <p className="metric mt-1 text-lg font-semibold">
+                {analytics.reliabilityScore !== null
+                  ? `${analytics.reliabilityScore}%`
+                  : "—"}
+              </p>
+            </div>
+          </div>
         </div>
       )}
 
-      <div className="mt-6 grid grid-cols-3 gap-3">
-        <div className="card p-4">
-          <p className="label">Avg today</p>
-          <p className="metric mt-1 text-2xl font-semibold">{analytics.averageWaitToday}m</p>
-        </div>
-        <div className="card p-4">
-          <p className="label">Peak today</p>
-          <p className="metric mt-1 text-2xl font-semibold">{analytics.peakWaitToday}m</p>
-        </div>
-        <div className="card p-4">
-          <p className="label">Period avg</p>
-          <p className="metric mt-1 text-2xl font-semibold">{analytics.lowestAverageWait}m</p>
-        </div>
-      </div>
-
       <div className="mt-10">
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-sm font-medium text-[var(--fg)]">Wait history</h2>
-          <div className="flex gap-1.5">
-            {rangeOptions.map((opt) => (
-              <button
-                key={opt.value}
-                onClick={() => setRange(opt.value)}
-                className={cn("chip", range === opt.value && "chip-active")}
-              >
-                {opt.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
+        <h2 className="mb-1 text-sm font-medium text-[var(--fg)]">
+          Today&apos;s wait times
+        </h2>
+        <p className="mb-4 text-xs text-[var(--fg-muted)]">
+          Updates automatically every 5 minutes
+        </p>
         {loading ? (
           <div className="skeleton h-72 rounded-2xl" />
         ) : (
-          <WaitChart data={chartData} range={range} />
+          <DailyWaitChart
+            data={todayChartData}
+            currentWait={ride.is_open ? ride.wait_time : undefined}
+            isOpen={ride.is_open}
+          />
         )}
       </div>
 
-      <div className="mt-6">
-        <HourlyWaitChart
-          data={analytics.averageWaitByHour.map((h) => ({
-            label: h.label,
-            average: h.average,
-          }))}
-        />
+      <div className="mt-10">
+        <h2 className="mb-1 text-sm font-medium text-[var(--fg)]">
+          Weekly average wait pattern
+        </h2>
+        <p className="mb-4 text-xs text-[var(--fg-muted)]">
+          Average wait by time of day from the last 30 days
+        </p>
+        {loading ? (
+          <div className="skeleton h-64 rounded-2xl" />
+        ) : (
+          <WeeklyPatternChart
+            data={analytics.weeklyPattern}
+            bestHour={analytics.hourlyMinimum.hour}
+            peakHour={
+              analytics.averageWaitByHour.length > 0
+                ? analytics.averageWaitByHour.reduce((max, h) =>
+                    h.average > max.average ? h : max
+                  ).hour
+                : undefined
+            }
+          />
+        )}
+        {hasInsights && (
+          <div className="mt-3 flex flex-wrap gap-4 text-xs text-[var(--fg-muted)]">
+            <span>
+              Best period:{" "}
+              <span className="text-[var(--wait-low)]">
+                {analytics.hourlyMinimum.label} ({analytics.hourlyMinimum.average}m avg)
+              </span>
+            </span>
+            {analytics.peakTimeToRide !== "Not enough data" && (
+              <span>
+                Peak period:{" "}
+                <span className="text-[var(--wait-high)]">
+                  {analytics.peakTimeToRide} ({analytics.peakTimeAverageWait}m avg)
+                </span>
+              </span>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

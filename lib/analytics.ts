@@ -1,5 +1,14 @@
-import type { RideAnalytics, WaitTimeRecord } from "@/types";
+import type {
+  RideAnalytics,
+  RideWithLiveData,
+  TrendInfo,
+  WaitDropAlert,
+  WaitTimeRecord,
+  SortOption,
+  CrowdScore,
+} from "@/types";
 import { formatHourLabel, formatHourMinute } from "@/utils/wait-time";
+import { WAIT_THRESHOLDS } from "@/lib/constants";
 import {
   startOfDay,
   subDays,
@@ -28,12 +37,213 @@ export function filterRecordsByRange(
   return records.filter((r) => isAfter(new Date(r.timestamp), start));
 }
 
+function bucketByHour(records: WaitTimeRecord[]) {
+  const buckets = new Map<number, { total: number; count: number }>();
+
+  for (const record of records) {
+    if (!record.is_open) continue;
+    const hour = getHours(new Date(record.timestamp));
+    const bucket = buckets.get(hour) ?? { total: 0, count: 0 };
+    bucket.total += record.wait_time;
+    bucket.count += 1;
+    buckets.set(hour, bucket);
+  }
+
+  return Array.from(buckets.entries())
+    .map(([hour, { total, count }]) => ({
+      hour,
+      label: formatHourLabel(hour),
+      average: Math.round(total / count),
+      count,
+    }))
+    .sort((a, b) => a.hour - b.hour);
+}
+
+function bucketByTenMinutes(records: WaitTimeRecord[]) {
+  const buckets = new Map<string, { total: number; count: number }>();
+
+  for (const record of records) {
+    if (!record.is_open) continue;
+    const date = new Date(record.timestamp);
+    const hour = getHours(date);
+    const minuteBucket = Math.floor(getMinutes(date) / 10) * 10;
+    const key = `${hour}:${minuteBucket}`;
+    const bucket = buckets.get(key) ?? { total: 0, count: 0 };
+    bucket.total += record.wait_time;
+    bucket.count += 1;
+    buckets.set(key, bucket);
+  }
+
+  return buckets;
+}
+
+function findBestBucket(buckets: Map<string, { total: number; count: number }>) {
+  let best = { hour: 0, minute: 0, average: Infinity };
+  for (const [key, { total, count }] of buckets.entries()) {
+    const [hourStr, minuteStr] = key.split(":");
+    const average = total / count;
+    if (average < best.average) {
+      best = {
+        hour: Number(hourStr),
+        minute: Number(minuteStr),
+        average: Math.round(average),
+      };
+    }
+  }
+  return best;
+}
+
+function findPeakBucket(buckets: Map<string, { total: number; count: number }>) {
+  let peak = { hour: 0, minute: 0, average: -Infinity };
+  for (const [key, { total, count }] of buckets.entries()) {
+    const [hourStr, minuteStr] = key.split(":");
+    const average = total / count;
+    if (average > peak.average) {
+      peak = {
+        hour: Number(hourStr),
+        minute: Number(minuteStr),
+        average: Math.round(average),
+      };
+    }
+  }
+  return peak;
+}
+
+export function computeReliabilityScore(
+  records: WaitTimeRecord[]
+): number | null {
+  if (records.length < 6) return null;
+  const openCount = records.filter((r) => r.is_open).length;
+  return Math.round((openCount / records.length) * 100);
+}
+
+export function computeLiveTrend(
+  records: WaitTimeRecord[],
+  currentWait?: number
+): TrendInfo {
+  const open = records.filter((r) => r.is_open);
+  if (open.length < 2) {
+    return { trend: "flat", label: "Stable", change: 0 };
+  }
+
+  const recent = open.slice(-4);
+  const prior = open.slice(-8, -4);
+
+  let change: number;
+  if (prior.length >= 2) {
+    const recentAvg =
+      recent.reduce((s, r) => s + r.wait_time, 0) / recent.length;
+    const priorAvg =
+      prior.reduce((s, r) => s + r.wait_time, 0) / prior.length;
+    change = Math.round(recentAvg - priorAvg);
+  } else {
+    change = open[open.length - 1].wait_time - open[0].wait_time;
+  }
+
+  if (currentWait !== undefined && recent.length > 0) {
+    const lastRecorded = recent[recent.length - 1].wait_time;
+    change = currentWait - lastRecorded;
+  }
+
+  if (change >= 15) {
+    return { trend: "rising_fast", label: "Wait rising quickly", change };
+  }
+  if (change >= 5) {
+    return { trend: "up", label: "Wait rising", change };
+  }
+  if (change <= -15) {
+    return { trend: "falling_fast", label: "Dropping from peak", change };
+  }
+  if (change <= -5) {
+    return { trend: "down", label: "Wait falling", change };
+  }
+  return { trend: "flat", label: "Stable", change };
+}
+
+export function detectWaitDrop(
+  records: WaitTimeRecord[],
+  threshold = 15
+): { amount: number; message: string } | null {
+  const open = records.filter((r) => r.is_open);
+  if (open.length < 2) return null;
+
+  const latest = open[open.length - 1];
+  const previous = open[open.length - 2];
+  const amount = previous.wait_time - latest.wait_time;
+
+  if (amount >= threshold) {
+    return {
+      amount,
+      message: `Dropped ${amount} min — now may be a good time to ride`,
+    };
+  }
+  return null;
+}
+
+export function computeCrowdScore(rides: RideWithLiveData[]): CrowdScore {
+  const open = rides.filter((r) => r.is_open);
+  const total = rides.length;
+
+  if (open.length === 0) {
+    return { score: 0, level: "low", label: "Low" };
+  }
+
+  const avgWait =
+    open.reduce((s, r) => s + r.wait_time, 0) / open.length;
+  const shortWaitRatio =
+    open.filter((r) => r.wait_time <= WAIT_THRESHOLDS.low).length /
+    open.length;
+  const openRatio = open.length / total;
+
+  const waitScore = Math.min(100, (avgWait / 90) * 100);
+  const distributionScore = (1 - shortWaitRatio) * 100;
+  const downtimeScore = (1 - openRatio) * 100;
+
+  const score = Math.round(
+    waitScore * 0.5 + distributionScore * 0.3 + downtimeScore * 0.2
+  );
+
+  const level: CrowdScore["level"] =
+    score <= 35 ? "low" : score <= 65 ? "moderate" : "heavy";
+  const label = level === "low" ? "Low" : level === "moderate" ? "Moderate" : "Heavy";
+
+  return { score, level, label };
+}
+
+export function findWaitDrops(
+  rides: RideWithLiveData[],
+  recordsByRide: Map<number, WaitTimeRecord[]>,
+  threshold = 15
+): WaitDropAlert[] {
+  const alerts: WaitDropAlert[] = [];
+
+  for (const ride of rides) {
+    if (!ride.is_open) continue;
+    const records = recordsByRide.get(ride.ride_id);
+    if (!records) continue;
+    const drop = detectWaitDrop(records, threshold);
+    if (drop) {
+      alerts.push({
+        rideId: ride.ride_id,
+        rideName: ride.name,
+        amount: drop.amount,
+        message: `${ride.name} dropped ${drop.amount} min`,
+      });
+    }
+  }
+
+  return alerts.sort((a, b) => b.amount - a.amount);
+}
+
 export function computeRideAnalytics(
   records: WaitTimeRecord[],
   range: "today" | "7d" | "30d"
 ): RideAnalytics {
   const filtered = filterRecordsByRange(records, range);
   const openRecords = filtered.filter((r) => r.is_open);
+  const historicalOpen = filterRecordsByRange(records, "30d").filter(
+    (r) => r.is_open
+  );
 
   const todayStart = startOfDay(new Date());
   const todayRecords = records.filter(
@@ -53,25 +263,8 @@ export function computeRideAnalytics(
       ? Math.max(...todayRecords.map((r) => r.wait_time))
       : 0;
 
-  const hourlyBuckets = new Map<number, { total: number; count: number }>();
-
-  for (const record of openRecords) {
-    const date = new Date(record.timestamp);
-    const hour = getHours(date);
-    const bucket = hourlyBuckets.get(hour) ?? { total: 0, count: 0 };
-    bucket.total += record.wait_time;
-    bucket.count += 1;
-    hourlyBuckets.set(hour, bucket);
-  }
-
-  const averageWaitByHour = Array.from(hourlyBuckets.entries())
-    .map(([hour, { total, count }]) => ({
-      hour,
-      label: formatHourLabel(hour),
-      average: Math.round(total / count),
-      count,
-    }))
-    .sort((a, b) => a.hour - b.hour);
+  const averageWaitByHour = bucketByHour(openRecords);
+  const weeklyPattern = bucketByHour(historicalOpen);
 
   const hourlyMinimum =
     averageWaitByHour.length > 0
@@ -80,31 +273,9 @@ export function computeRideAnalytics(
         )
       : { hour: 0, label: "N/A", average: 0, count: 0 };
 
-  const tenMinuteBuckets = new Map<string, { total: number; count: number }>();
-
-  for (const record of openRecords) {
-    const date = new Date(record.timestamp);
-    const hour = getHours(date);
-    const minuteBucket = Math.floor(getMinutes(date) / 10) * 10;
-    const key = `${hour}:${minuteBucket}`;
-    const bucket = tenMinuteBuckets.get(key) ?? { total: 0, count: 0 };
-    bucket.total += record.wait_time;
-    bucket.count += 1;
-    tenMinuteBuckets.set(key, bucket);
-  }
-
-  let bestBucket = { hour: 0, minute: 0, average: Infinity };
-  for (const [key, { total, count }] of tenMinuteBuckets.entries()) {
-    const [hourStr, minuteStr] = key.split(":");
-    const average = total / count;
-    if (average < bestBucket.average) {
-      bestBucket = {
-        hour: Number(hourStr),
-        minute: Number(minuteStr),
-        average: Math.round(average),
-      };
-    }
-  }
+  const tenMinuteBuckets = bucketByTenMinutes(historicalOpen);
+  const bestBucket = findBestBucket(tenMinuteBuckets);
+  const peakBucket = findPeakBucket(tenMinuteBuckets);
 
   const lowestAverageWait =
     openRecords.length > 0
@@ -114,63 +285,46 @@ export function computeRideAnalytics(
         )
       : 0;
 
-  const hasEnoughDataForInsights = openRecords.length >= 3;
+  const hasEnoughData = historicalOpen.length >= 3;
 
   return {
     averageWaitToday,
     peakWaitToday,
     lowestAverageWait,
     bestTimeToRide:
-      !hasEnoughDataForInsights || bestBucket.average === Infinity
+      !hasEnoughData || bestBucket.average === Infinity
         ? "Not enough data"
         : formatHourMinute(bestBucket.hour, bestBucket.minute),
     bestTimeAverageWait:
-      !hasEnoughDataForInsights || bestBucket.average === Infinity
-        ? 0
-        : bestBucket.average,
+      !hasEnoughData || bestBucket.average === Infinity ? 0 : bestBucket.average,
+    peakTimeToRide:
+      !hasEnoughData || peakBucket.average === -Infinity
+        ? "Not enough data"
+        : formatHourMinute(peakBucket.hour, peakBucket.minute),
+    peakTimeAverageWait:
+      !hasEnoughData || peakBucket.average === -Infinity ? 0 : peakBucket.average,
     averageWaitByHour,
     hourlyMinimum,
+    weeklyPattern,
+    reliabilityScore: computeReliabilityScore(
+      filterRecordsByRange(records, "30d")
+    ),
   };
 }
 
-export function computeParkStats(
-  rides: { is_open: boolean; wait_time: number; name: string }[]
-) {
-  const openRides = rides.filter((r) => r.is_open);
-  const waits = openRides.map((r) => r.wait_time);
+export function computeBestTimeInsight(
+  openRecords: WaitTimeRecord[]
+): { time: string; average: number } | null {
+  if (openRecords.length < 3) return null;
 
-  const averageWait =
-    waits.length > 0
-      ? Math.round(waits.reduce((a, b) => a + b, 0) / waits.length)
-      : 0;
-
-  const longest = openRides.reduce(
-    (max, r) => (r.wait_time > max.wait_time ? r : max),
-    openRides[0] ?? { wait_time: 0, name: "N/A" }
-  );
-
-  const lowest = openRides.reduce(
-    (min, r) => (r.wait_time < min.wait_time ? r : min),
-    openRides[0] ?? { wait_time: 0, name: "N/A" }
-  );
+  const buckets = bucketByTenMinutes(openRecords);
+  const best = findBestBucket(buckets);
+  if (best.average === Infinity) return null;
 
   return {
-    averageWait,
-    openRides: openRides.length,
-    totalRides: rides.length,
-    longestWait: longest?.wait_time ?? 0,
-    longestWaitRide: longest?.name ?? "N/A",
-    lowestWait: lowest?.wait_time ?? 0,
-    lowestWaitRide: lowest?.name ?? "N/A",
+    time: formatHourMinute(best.hour, best.minute),
+    average: best.average,
   };
-}
-
-export function findBestRideNow(
-  rides: { is_open: boolean; wait_time: number; name: string; ride_id: number }[]
-) {
-  const open = rides.filter((r) => r.is_open);
-  if (open.length === 0) return null;
-  return open.reduce((best, r) => (r.wait_time < best.wait_time ? r : best));
 }
 
 export function sortRides<T extends { name: string; is_open: boolean; wait_time: number }>(
@@ -190,4 +344,17 @@ export function sortRides<T extends { name: string; is_open: boolean; wait_time:
         .filter((r) => r.is_open)
         .sort((a, b) => b.wait_time - a.wait_time);
   }
+}
+
+export function sortRidesWithFavoritesFilter<
+  T extends { ride_id: number; name: string; is_open: boolean; wait_time: number },
+>(rides: T[], sort: SortOption, favoriteIds: number[]): T[] {
+  let result = rides;
+  if (sort === "favorites") {
+    result = rides.filter((r) => favoriteIds.includes(r.ride_id));
+  }
+  return sortRides(
+    result,
+    sort === "favorites" ? "highest" : sort
+  );
 }

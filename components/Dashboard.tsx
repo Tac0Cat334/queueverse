@@ -1,29 +1,31 @@
 "use client";
 
 import { useState, useMemo, useCallback, useEffect } from "react";
-import { Search, RefreshCw } from "lucide-react";
-import type { RideWithLiveData, SortOption, RideInsight } from "@/types";
+import { Search, RefreshCw, Star } from "lucide-react";
+import type { RideWithLiveData, SortOption, RideInsight, WaitDropAlert } from "@/types";
 import { Hero } from "./Hero";
 import { ParkSummary } from "./ParkSummary";
 import { RideCard, RideCardSkeleton } from "./RideCard";
 import { DataAttribution } from "./DataAttribution";
 import { computeParkIntelligence } from "@/lib/park-intelligence";
-import { sortRides } from "@/lib/analytics";
+import { sortRidesWithFavoritesFilter } from "@/lib/analytics";
 import { getLatestUpdateTime } from "@/lib/queue-times";
 import { REFRESH_INTERVAL_MS } from "@/lib/constants";
 import { useAutoRefresh } from "@/hooks/use-auto-refresh";
 import { useDebouncedValue } from "@/hooks/use-auto-refresh";
+import { useFavorites } from "@/hooks/use-favorites";
 import { cn } from "@/utils/wait-time";
 
 interface DashboardProps {
   initialRides: RideWithLiveData[];
 }
 
-const sortOptions: { value: SortOption; label: string }[] = [
+const sortOptions: { value: SortOption; label: string; icon?: typeof Star }[] = [
   { value: "highest", label: "Longest" },
   { value: "lowest", label: "Shortest" },
   { value: "alphabetical", label: "A–Z" },
   { value: "open", label: "Open" },
+  { value: "favorites", label: "Favorites", icon: Star },
 ];
 
 export function Dashboard({ initialRides }: DashboardProps) {
@@ -33,10 +35,11 @@ export function Dashboard({ initialRides }: DashboardProps) {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [insights, setInsights] = useState<Record<number, RideInsight>>({});
   const debouncedSearch = useDebouncedValue(search);
+  const { favorites, toggleFavorite, isFavorite } = useFavorites();
 
   const fetchInsights = useCallback(async () => {
     try {
-      const res = await fetch("/api/insights");
+      const res = await fetch("/api/insights", { cache: "no-store" });
       const data = await res.json();
       if (data.insights) setInsights(data.insights);
     } catch {
@@ -69,6 +72,18 @@ export function Dashboard({ initialRides }: DashboardProps) {
   const lastUpdated = useMemo(() => getLatestUpdateTime(rides), [rides]);
   const intel = useMemo(() => computeParkIntelligence(rides), [rides]);
 
+  const waitDrops = useMemo((): WaitDropAlert[] => {
+    return rides
+      .filter((r) => r.is_open && insights[r.ride_id]?.waitDrop)
+      .map((r) => ({
+        rideId: r.ride_id,
+        rideName: r.name,
+        amount: insights[r.ride_id].waitDrop!.amount,
+        message: insights[r.ride_id].waitDrop!.message,
+      }))
+      .sort((a, b) => b.amount - a.amount);
+  }, [rides, insights]);
+
   const filteredRides = useMemo(() => {
     let result = rides;
     if (debouncedSearch) {
@@ -79,13 +94,13 @@ export function Dashboard({ initialRides }: DashboardProps) {
           r.land.toLowerCase().includes(q)
       );
     }
-    return sortRides(result, sort);
-  }, [rides, debouncedSearch, sort]);
+    return sortRidesWithFavoritesFilter(result, sort, favorites);
+  }, [rides, debouncedSearch, sort, favorites]);
 
   return (
     <>
       <Hero lastUpdated={lastUpdated} />
-      <ParkSummary intel={intel} />
+      <ParkSummary intel={intel} waitDrops={waitDrops} />
 
       <section className="mx-auto mt-10 max-w-5xl px-4 pb-16 sm:px-6" id="rides">
         <div className="sticky top-[57px] z-40 -mx-4 bg-[var(--bg)] px-4 py-3 sm:-mx-6 sm:px-6">
@@ -107,10 +122,11 @@ export function Dashboard({ initialRides }: DashboardProps) {
                   key={opt.value}
                   onClick={() => setSort(opt.value)}
                   className={cn(
-                    "chip shrink-0",
+                    "chip shrink-0 inline-flex items-center gap-1",
                     sort === opt.value ? "chip-active" : ""
                   )}
                 >
+                  {opt.icon && <opt.icon className="h-3 w-3" />}
                   {opt.label}
                 </button>
               ))}
@@ -120,7 +136,9 @@ export function Dashboard({ initialRides }: DashboardProps) {
                 className="chip shrink-0 disabled:opacity-40"
                 aria-label="Refresh"
               >
-                <RefreshCw className={cn("h-3.5 w-3.5", isRefreshing && "animate-spin")} />
+                <RefreshCw
+                  className={cn("h-3.5 w-3.5", isRefreshing && "animate-spin")}
+                />
               </button>
             </div>
           </div>
@@ -129,7 +147,9 @@ export function Dashboard({ initialRides }: DashboardProps) {
         <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {filteredRides.length === 0 ? (
             <p className="col-span-full py-16 text-center text-sm text-[var(--fg-muted)]">
-              No rides match your search.
+              {sort === "favorites"
+                ? "No favorite rides yet. Tap the star on any ride."
+                : "No rides match your search."}
             </p>
           ) : (
             filteredRides.map((ride) => (
@@ -137,6 +157,8 @@ export function Dashboard({ initialRides }: DashboardProps) {
                 key={ride.ride_id}
                 ride={ride}
                 insight={insights[ride.ride_id]}
+                isFavorite={isFavorite(ride.ride_id)}
+                onToggleFavorite={() => toggleFavorite(ride.ride_id)}
               />
             ))
           )}

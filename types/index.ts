@@ -39,7 +39,7 @@ export interface RideWithLiveData extends Ride {
   last_updated: string;
 }
 
-export type SortOption = "highest" | "lowest" | "alphabetical" | "open";
+export type SortOption = "highest" | "lowest" | "alphabetical" | "open" | "favorites";
 
 export type TimeRange = "today" | "7d" | "30d";
 
@@ -62,14 +62,43 @@ export interface RideAnalytics {
   lowestAverageWait: number;
   bestTimeToRide: string;
   bestTimeAverageWait: number;
+  peakTimeToRide: string;
+  peakTimeAverageWait: number;
   averageWaitByHour: { hour: number; label: string; average: number; count: number }[];
   hourlyMinimum: { hour: number; label: string; average: number };
+  weeklyPattern: { hour: number; label: string; average: number }[];
+  reliabilityScore: number | null;
+}
+
+export type TrendDirection = "up" | "down" | "flat" | "rising_fast" | "falling_fast";
+
+export interface TrendInfo {
+  trend: TrendDirection;
+  label: string;
+  change: number;
+}
+
+export interface WaitDropAlert {
+  rideId: number;
+  rideName: string;
+  amount: number;
+  message: string;
+}
+
+export interface CrowdScore {
+  score: number;
+  level: "low" | "moderate" | "heavy";
+  label: string;
 }
 
 export interface RideInsight {
   bestTime: string | null;
   bestTimeAvg: number | null;
-  trend: "up" | "down" | "flat";
+  trend: TrendDirection;
+  trendLabel: string;
+  trendChange: number;
+  waitDrop: { amount: number; message: string } | null;
+  reliability: number | null;
 }
 
 export interface ChartDataPoint {
