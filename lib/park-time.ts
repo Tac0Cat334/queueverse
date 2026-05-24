@@ -132,3 +132,9 @@ export function getParkDateKey(date: Date | string): string {
   const parts = getParkParts(new Date(date));
   return `${parts.year}-${String(parts.month).padStart(2, "0")}-${String(parts.day).padStart(2, "0")}`;
 }
+
+/** Minutes since midnight in park local time */
+export function getParkTimeMinutes(reference = new Date()): number {
+  const parts = getParkParts(reference);
+  return parts.hour * 60 + parts.minute;
+}

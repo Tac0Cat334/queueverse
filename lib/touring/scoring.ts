@@ -1,4 +1,4 @@
-import type { RideWithLiveData, RideIntelligence, TouringPreference } from "@/types";
+import type { RideWithLiveData, RideIntelligence, TouringPreference, TouringPlanMode } from "@/types";
 import { getLandFlowPenalty, getLandTravelMinutes } from "./lands";
 
 const RIDE_DURATION_MIN = 8;
@@ -205,8 +205,9 @@ export function scoreRideForSchedule(params: {
   lastLand: string | null;
   preference: TouringPreference;
   expressPass: boolean;
+  planMode?: TouringPlanMode;
 }): RideScheduleScore {
-  const { ride, intel, cursorMinutes, lastLand, preference, expressPass } = params;
+  const { ride, intel, cursorMinutes, lastLand, preference, expressPass, planMode = "live" } = params;
   const hour = Math.floor(cursorMinutes / 60) % 24;
 
   const urgency = computeUrgency(ride, intel, cursorMinutes);
@@ -218,7 +219,12 @@ export function scoreRideForSchedule(params: {
 
   let estimatedWait = waitAtMinutes(intel, ride, cursorMinutes, 0);
   if (ride.is_open) {
-    estimatedWait = Math.round(estimatedWait * 0.5 + ride.wait_time * 0.5);
+    if (planMode === "live") {
+      // In-park mode: current wait is the primary signal
+      estimatedWait = Math.round(ride.wait_time * 0.85 + estimatedWait * 0.15);
+    } else {
+      estimatedWait = Math.round(estimatedWait * 0.5 + ride.wait_time * 0.5);
+    }
   }
   if (expressPass) {
     estimatedWait = Math.round(estimatedWait * 0.4);
@@ -226,7 +232,7 @@ export function scoreRideForSchedule(params: {
 
   const totalScore =
     urgency.score +
-    Math.round(opportunityBase * 0.25) +
+    Math.round(opportunityBase * (planMode === "live" ? 0.35 : 0.25)) +
     timingScore +
     landScore +
     preferenceScore -

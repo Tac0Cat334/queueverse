@@ -207,7 +207,13 @@ export interface IntelligencePayload {
 
 export type TouringPreference = "thrill" | "family" | "mixed";
 
+export type TouringPlanMode = "live" | "fullday";
+
 export interface TouringPlanPreferences {
+  /** live = current waits & next few hours; fullday = historical best times across visit */
+  planMode: TouringPlanMode;
+  /** Hours ahead to optimize when planMode is live */
+  liveWindowHours: number;
   arrivalHour: number;
   departureHour: number;
   mustDoRideIds: number[];
@@ -233,6 +239,8 @@ export interface TouringPlanItem {
   priorityLabel?: string;
   isOpen?: boolean;
   travelMinutes?: number;
+  /** Full-day mode: historically ideal time label */
+  idealTime?: string;
 }
 
 export interface TouringPlan {

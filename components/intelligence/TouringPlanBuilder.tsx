@@ -124,56 +124,131 @@ export function TouringPlanBuilder({
             Dynamic touring plan
           </h2>
           <p className="mt-0.5 text-xs leading-relaxed text-[var(--fg-muted)]">
-            Optimizes only the rides you select — using live waits, predictions,
-            land flow, and historical patterns.
+            {prefs.planMode === "live"
+              ? "Optimize selected rides using live waits for the next few hours."
+              : "Schedule each ride at its historically best time across your visit."}
           </p>
         </div>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <PrefSelect
-          label="Arrival"
-          value={prefs.arrivalHour}
-          onChange={(v) => setPrefs((p) => ({ ...p, arrivalHour: v }))}
-        />
-        <PrefSelect
-          label="Departure"
-          value={prefs.departureHour}
-          onChange={(v) => setPrefs((p) => ({ ...p, departureHour: v }))}
-        />
-        <label className="block">
-          <span className="label">Style</span>
-          <select
-            value={prefs.preference}
-            onChange={(e) =>
-              setPrefs((p) => ({
-                ...p,
-                preference: e.target.value as TouringPlanPreferences["preference"],
-              }))
-            }
-            className="input-field mt-1.5 w-full py-2 text-sm"
-          >
-            <option value="mixed">Mixed</option>
-            <option value="thrill">Thrill priority</option>
-            <option value="family">Family friendly</option>
-          </select>
-        </label>
-        <label className="block">
-          <span className="label">Options</span>
-          <div className="mt-2 space-y-2">
-            <Checkbox
-              label="Express pass"
-              checked={prefs.expressPass}
-              onChange={(v) => setPrefs((p) => ({ ...p, expressPass: v }))}
-            />
-            <Checkbox
-              label="Lunch during peak"
-              checked={prefs.lunchBreak}
-              onChange={(v) => setPrefs((p) => ({ ...p, lunchBreak: v }))}
-            />
-          </div>
-        </label>
+      <div className="mb-5">
+        <p className="label mb-2">Planning mode</p>
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          <ModeCard
+            active={prefs.planMode === "live"}
+            title="In the park now"
+            description="Uses current wait times to optimize your selected rides over the next few hours."
+            onClick={() => {
+              setPlan(null);
+              setPrefs((p) => ({ ...p, planMode: "live" }));
+            }}
+          />
+          <ModeCard
+            active={prefs.planMode === "fullday"}
+            title="Plan my full day"
+            description="Uses historical patterns to schedule each ride at its best time of day."
+            onClick={() => {
+              setPlan(null);
+              setPrefs((p) => ({ ...p, planMode: "fullday" }));
+            }}
+          />
+        </div>
       </div>
+
+      {prefs.planMode === "live" ? (
+        <div className="mb-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <label className="block">
+            <span className="label">Time window</span>
+            <select
+              value={prefs.liveWindowHours}
+              onChange={(e) =>
+                setPrefs((p) => ({
+                  ...p,
+                  liveWindowHours: Number(e.target.value),
+                }))
+              }
+              className="input-field mt-1.5 w-full py-2 text-sm"
+            >
+              <option value={1}>Next 1 hour</option>
+              <option value={2}>Next 2 hours</option>
+              <option value={3}>Next 3 hours</option>
+              <option value={4}>Next 4 hours</option>
+            </select>
+          </label>
+          <label className="block">
+            <span className="label">Style</span>
+            <select
+              value={prefs.preference}
+              onChange={(e) =>
+                setPrefs((p) => ({
+                  ...p,
+                  preference: e.target.value as TouringPlanPreferences["preference"],
+                }))
+              }
+              className="input-field mt-1.5 w-full py-2 text-sm"
+            >
+              <option value="mixed">Mixed</option>
+              <option value="thrill">Thrill priority</option>
+              <option value="family">Family friendly</option>
+            </select>
+          </label>
+          <label className="block">
+            <span className="label">Options</span>
+            <div className="mt-2">
+              <Checkbox
+                label="Express pass"
+                checked={prefs.expressPass}
+                onChange={(v) => setPrefs((p) => ({ ...p, expressPass: v }))}
+              />
+            </div>
+          </label>
+        </div>
+      ) : (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <PrefSelect
+            label="Arrival"
+            value={prefs.arrivalHour}
+            onChange={(v) => setPrefs((p) => ({ ...p, arrivalHour: v }))}
+          />
+          <PrefSelect
+            label="Departure"
+            value={prefs.departureHour}
+            onChange={(v) => setPrefs((p) => ({ ...p, departureHour: v }))}
+          />
+          <label className="block">
+            <span className="label">Style</span>
+            <select
+              value={prefs.preference}
+              onChange={(e) =>
+                setPrefs((p) => ({
+                  ...p,
+                  preference: e.target.value as TouringPlanPreferences["preference"],
+                }))
+              }
+              className="input-field mt-1.5 w-full py-2 text-sm"
+            >
+              <option value="mixed">Mixed</option>
+              <option value="thrill">Thrill priority</option>
+              <option value="family">Family friendly</option>
+            </select>
+          </label>
+          <label className="block">
+            <span className="label">Options</span>
+            <div className="mt-2 space-y-2">
+              <Checkbox
+                label="Express pass"
+                checked={prefs.expressPass}
+                onChange={(v) => setPrefs((p) => ({ ...p, expressPass: v }))}
+              />
+              <Checkbox
+                label="Lunch during peak"
+                checked={prefs.lunchBreak}
+                onChange={(v) => setPrefs((p) => ({ ...p, lunchBreak: v }))}
+              />
+            </div>
+          </label>
+        </div>
+      )}
 
       <div className="mt-6">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
@@ -281,8 +356,10 @@ export function TouringPlanBuilder({
           </>
         ) : selectedCount === 0 ? (
           "Select rides to generate"
+        ) : prefs.planMode === "live" ? (
+          `Optimize next ${prefs.liveWindowHours}h (${selectedCount} ride${selectedCount === 1 ? "" : "s"})`
         ) : (
-          `Generate plan for ${selectedCount} ride${selectedCount === 1 ? "" : "s"}`
+          `Build full-day plan (${selectedCount} ride${selectedCount === 1 ? "" : "s"})`
         )}
       </button>
 
@@ -454,6 +531,11 @@ function TimelineItem({
         {item.land && (
           <p className="text-[10px] text-[var(--fg-muted)]">{item.land}</p>
         )}
+        {item.idealTime && (
+          <p className="text-[10px] text-[var(--wait-low)]">
+            Ideal window: {item.idealTime}
+          </p>
+        )}
         <p className="mt-1.5 text-[11px] leading-relaxed text-[var(--fg-secondary)]">
           {item.reason}
         </p>
@@ -495,6 +577,36 @@ function PriorityBadge({
     >
       {label}
     </span>
+  );
+}
+
+function ModeCard({
+  active,
+  title,
+  description,
+  onClick,
+}: {
+  active: boolean;
+  title: string;
+  description: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "rounded-xl border p-3 text-left transition-all",
+        active
+          ? "border-[var(--fg)] bg-[var(--surface-hover)]"
+          : "border-[var(--border)] bg-[var(--surface)] hover:border-[var(--fg-muted)]"
+      )}
+    >
+      <p className="text-sm font-medium text-[var(--fg)]">{title}</p>
+      <p className="mt-1 text-[11px] leading-relaxed text-[var(--fg-muted)]">
+        {description}
+      </p>
+    </button>
   );
 }
 
