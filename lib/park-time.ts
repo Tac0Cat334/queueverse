@@ -138,3 +138,14 @@ export function getParkTimeMinutes(reference = new Date()): number {
   const parts = getParkParts(reference);
   return parts.hour * 60 + parts.minute;
 }
+
+export function getParkDateInputValue(reference = new Date()): string {
+  const parts = getParkParts(reference);
+  return `${parts.year}-${String(parts.month).padStart(2, "0")}-${String(parts.day).padStart(2, "0")}`;
+}
+
+/** Parse YYYY-MM-DD from a date input as a stable park-local calendar day. */
+export function parseVisitDateInput(isoDate: string): Date {
+  if (!isoDate) return new Date();
+  return getParkStartOfDay(new Date(`${isoDate}T12:00:00Z`));
+}

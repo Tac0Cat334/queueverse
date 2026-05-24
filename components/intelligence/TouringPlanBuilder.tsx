@@ -24,6 +24,13 @@ import {
 } from "@/lib/touring-plan";
 import { groupRidesByLand } from "@/lib/touring/lands";
 import { isMainRide } from "@/lib/queue-times";
+import {
+  getParkDateInputValue,
+  getParkDayOfWeek,
+  parseVisitDateInput,
+  formatParkDateLabel,
+} from "@/lib/park-time";
+import { getVisitDayInsight } from "@/lib/weekday-analytics";
 import { cn } from "@/utils/wait-time";
 
 interface TouringPlanBuilderProps {
@@ -35,9 +42,10 @@ export function TouringPlanBuilder({
   rides,
   recommendations,
 }: TouringPlanBuilderProps) {
-  const [prefs, setPrefs] = useState<TouringPlanPreferences>(
-    DEFAULT_TOURING_PREFERENCES
-  );
+  const [prefs, setPrefs] = useState<TouringPlanPreferences>(() => ({
+    ...DEFAULT_TOURING_PREFERENCES,
+    visitDate: getParkDateInputValue(),
+  }));
   const [plan, setPlan] = useState<TouringPlan | null>(null);
   const [adjustments, setAdjustments] = useState<PlanAdjustment[]>([]);
   const [generating, setGenerating] = useState(false);
@@ -72,6 +80,21 @@ export function TouringPlanBuilder({
   const selectedCount = prefs.mustDoRideIds.length;
   const canGenerate = selectedCount > 0 && !generating;
 
+  const visitDayInsight = useMemo(() => {
+    if (prefs.planMode !== "fullday" || !prefs.visitDate) return null;
+    const dow = getParkDayOfWeek(parseVisitDateInput(prefs.visitDate));
+    return getVisitDayInsight(recommendations.parkWeekdayInsights, dow);
+  }, [
+    prefs.planMode,
+    prefs.visitDate,
+    recommendations.parkWeekdayInsights,
+  ]);
+
+  const visitDateLabel = useMemo(() => {
+    if (!prefs.visitDate) return "";
+    return formatParkDateLabel(parseVisitDateInput(prefs.visitDate));
+  }, [prefs.visitDate]);
+
   async function generatePlan() {
     if (!canGenerate) return;
     setGenerating(true);
@@ -80,7 +103,11 @@ export function TouringPlanBuilder({
     const nextPlan = generateTouringPlan(
       allMainRides,
       recommendations.byRideId,
-      prefs
+      prefs,
+      {
+        weekdayPatternsByRide: recommendations.weekdayPatternsByRide,
+        parkWeekdayInsights: recommendations.parkWeekdayInsights,
+      }
     );
     setPlan(nextPlan);
     setAdjustments(
@@ -126,7 +153,7 @@ export function TouringPlanBuilder({
           <p className="mt-0.5 text-xs leading-relaxed text-[var(--fg-muted)]">
             {prefs.planMode === "live"
               ? "Optimize selected rides using live waits for the next few hours."
-              : "Schedule each ride at its historically best time across your visit."}
+              : "Schedule each ride at its historically best time for the day you're visiting."}
           </p>
         </div>
       </div>
@@ -146,7 +173,7 @@ export function TouringPlanBuilder({
           <ModeCard
             active={prefs.planMode === "fullday"}
             title="Plan my full day"
-            description="Uses historical patterns to schedule each ride at its best time of day."
+            description="Uses weekday-specific historical patterns to schedule each ride at its best time for your visit date."
             onClick={() => {
               setPlan(null);
               setPrefs((p) => ({ ...p, planMode: "fullday" }));
@@ -204,50 +231,84 @@ export function TouringPlanBuilder({
           </label>
         </div>
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <PrefSelect
-            label="Arrival"
-            value={prefs.arrivalHour}
-            onChange={(v) => setPrefs((p) => ({ ...p, arrivalHour: v }))}
-          />
-          <PrefSelect
-            label="Departure"
-            value={prefs.departureHour}
-            onChange={(v) => setPrefs((p) => ({ ...p, departureHour: v }))}
-          />
-          <label className="block">
-            <span className="label">Style</span>
-            <select
-              value={prefs.preference}
-              onChange={(e) =>
-                setPrefs((p) => ({
-                  ...p,
-                  preference: e.target.value as TouringPlanPreferences["preference"],
-                }))
-              }
-              className="input-field mt-1.5 w-full py-2 text-sm"
+        <>
+          {visitDayInsight && (
+            <div
+              className={cn(
+                "mb-4 rounded-xl border px-4 py-3 text-xs leading-relaxed",
+                visitDayInsight.crowdLevel === "busier" &&
+                  "border-amber-500/30 bg-amber-500/10 text-amber-100",
+                visitDayInsight.crowdLevel === "lighter" &&
+                  "border-emerald-500/30 bg-emerald-500/10 text-emerald-100",
+                visitDayInsight.crowdLevel === "typical" &&
+                  "border-[var(--border)] bg-[var(--surface-hover)] text-[var(--fg-muted)]"
+              )}
             >
-              <option value="mixed">Mixed</option>
-              <option value="thrill">Thrill priority</option>
-              <option value="family">Family friendly</option>
-            </select>
-          </label>
-          <label className="block">
-            <span className="label">Options</span>
-            <div className="mt-2 space-y-2">
-              <Checkbox
-                label="Express pass"
-                checked={prefs.expressPass}
-                onChange={(v) => setPrefs((p) => ({ ...p, expressPass: v }))}
-              />
-              <Checkbox
-                label="Lunch during peak"
-                checked={prefs.lunchBreak}
-                onChange={(v) => setPrefs((p) => ({ ...p, lunchBreak: v }))}
-              />
+              <p className="font-medium text-[var(--fg)]">
+                {visitDateLabel || visitDayInsight.label}
+              </p>
+              <p className="mt-1">{visitDayInsight.message}</p>
             </div>
-          </label>
-        </div>
+          )}
+
+          <div className="mb-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+            <label className="block">
+              <span className="label">Visit date</span>
+              <input
+                type="date"
+                value={prefs.visitDate}
+                min={getParkDateInputValue()}
+                onChange={(e) => {
+                  setPlan(null);
+                  setPrefs((p) => ({ ...p, visitDate: e.target.value }));
+                }}
+                className="input-field mt-1.5 w-full py-2 text-sm"
+              />
+            </label>
+            <PrefSelect
+              label="Arrival"
+              value={prefs.arrivalHour}
+              onChange={(v) => setPrefs((p) => ({ ...p, arrivalHour: v }))}
+            />
+            <PrefSelect
+              label="Departure"
+              value={prefs.departureHour}
+              onChange={(v) => setPrefs((p) => ({ ...p, departureHour: v }))}
+            />
+            <label className="block">
+              <span className="label">Style</span>
+              <select
+                value={prefs.preference}
+                onChange={(e) =>
+                  setPrefs((p) => ({
+                    ...p,
+                    preference: e.target.value as TouringPlanPreferences["preference"],
+                  }))
+                }
+                className="input-field mt-1.5 w-full py-2 text-sm"
+              >
+                <option value="mixed">Mixed</option>
+                <option value="thrill">Thrill priority</option>
+                <option value="family">Family friendly</option>
+              </select>
+            </label>
+            <label className="block">
+              <span className="label">Options</span>
+              <div className="mt-2 space-y-2">
+                <Checkbox
+                  label="Express pass"
+                  checked={prefs.expressPass}
+                  onChange={(v) => setPrefs((p) => ({ ...p, expressPass: v }))}
+                />
+                <Checkbox
+                  label="Lunch during peak"
+                  checked={prefs.lunchBreak}
+                  onChange={(v) => setPrefs((p) => ({ ...p, lunchBreak: v }))}
+                />
+              </div>
+            </label>
+          </div>
+        </>
       )}
 
       <div className="mt-6">

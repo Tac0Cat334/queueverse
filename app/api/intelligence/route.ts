@@ -21,6 +21,8 @@ export async function GET() {
           expectedToRiseSoon: [],
           byRideId: {},
           dataMaturity: { ...EMPTY_DATA_MATURITY, totalRides: rides.length },
+          weekdayPatternsByRide: {},
+          parkWeekdayInsights: {},
           generatedAt: new Date().toISOString(),
         },
         rides,

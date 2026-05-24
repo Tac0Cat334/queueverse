@@ -26,6 +26,10 @@ import {
   computeRideConfidence,
   getWeekdayLabel,
 } from "@/lib/data-maturity";
+import {
+  computeAllWeekdayPatterns,
+  computeParkWeekdayInsights,
+} from "@/lib/weekday-analytics";
 import { formatHourMinute } from "@/utils/wait-time";
 import { getParkParts } from "@/lib/park-time";
 
@@ -462,6 +466,9 @@ export function computeParkRecommendations(
     intelligence.map((i) => [i.rideId, i])
   ) as Record<number, RideIntelligence>;
 
+  const weekdayPatternsByRide = computeAllWeekdayPatterns(recordsByRide);
+  const parkWeekdayInsights = computeParkWeekdayInsights(allRecords);
+
   return {
     bestRightNow,
     greatTimeToRide,
@@ -470,6 +477,8 @@ export function computeParkRecommendations(
     expectedToRiseSoon,
     byRideId,
     dataMaturity,
+    weekdayPatternsByRide,
+    parkWeekdayInsights,
     generatedAt: new Date().toISOString(),
   };
 }

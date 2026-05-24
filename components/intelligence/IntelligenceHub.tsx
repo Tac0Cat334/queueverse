@@ -26,6 +26,8 @@ const EMPTY_RECOMMENDATIONS: ParkRecommendations = {
   expectedToRiseSoon: [],
   byRideId: {},
   dataMaturity: EMPTY_DATA_MATURITY,
+  weekdayPatternsByRide: {},
+  parkWeekdayInsights: {},
   generatedAt: new Date().toISOString(),
 };
 

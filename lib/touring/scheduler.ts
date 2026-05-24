@@ -5,28 +5,44 @@ import type {
   TouringPlanItem,
   TouringPlanPreferences,
   PlanAdjustment,
+  WeekdayPatternsByRide,
+  WeekdayCrowdInsight,
 } from "@/types";
 import { formatHourMinute } from "@/utils/wait-time";
-import { getParkTimeMinutes } from "@/lib/park-time";
+import {
+  getParkTimeMinutes,
+  getParkDayOfWeek,
+  parseVisitDateInput,
+  getParkDateInputValue,
+} from "@/lib/park-time";
+import { getWeekdayLabel } from "@/lib/data-maturity";
+import { getVisitDayInsight } from "@/lib/weekday-analytics";
 import { getLandTravelMinutes } from "./lands";
 import {
   scoreRideForSchedule,
-  findPeakLunchHour,
   RIDE_DURATION_MIN,
 } from "./scoring";
 import {
   assignHistoricalSlots,
   estimateHistoricalWait,
+  findPeakLunchHourForVisit,
+  type VisitDayContext,
 } from "./historical-slots";
 
 const LUNCH_MINUTES = 45;
+
+export interface TouringPlanOptions {
+  weekdayPatternsByRide?: WeekdayPatternsByRide;
+  parkWeekdayInsights?: Record<number, WeekdayCrowdInsight>;
+}
 
 type RideScheduleScore = ReturnType<typeof scoreRideForSchedule>;
 
 export function generateTouringPlan(
   rides: RideWithLiveData[],
   intelligenceByRide: Record<number, RideIntelligence>,
-  preferences: TouringPlanPreferences
+  preferences: TouringPlanPreferences,
+  options?: TouringPlanOptions
 ): TouringPlan {
   const rideMap = new Map(rides.map((r) => [r.ride_id, r]));
   const mustDoIds = preferences.mustDoRideIds.filter((id) => rideMap.has(id));
@@ -41,7 +57,8 @@ export function generateTouringPlan(
       intelligenceByRide,
       preferences,
       mustDoIds,
-      rideMap
+      rideMap,
+      options
     );
   }
 
@@ -140,17 +157,36 @@ function generateFullDayPlan(
   intelligenceByRide: Record<number, RideIntelligence>,
   preferences: TouringPlanPreferences,
   mustDoIds: number[],
-  rideMap: Map<number, RideWithLiveData>
+  rideMap: Map<number, RideWithLiveData>,
+  options?: TouringPlanOptions
 ): TouringPlan {
   const selectedRides = mustDoIds.map((id) => rideMap.get(id)!).filter(Boolean);
   const arrivalMinutes = preferences.arrivalHour * 60;
   const endMinutes = preferences.departureHour * 60;
 
+  const visitIso =
+    preferences.visitDate || getParkDateInputValue();
+  const visitInstant = parseVisitDateInput(visitIso);
+  const dayOfWeek = getParkDayOfWeek(visitInstant);
+  const dayLabel = getWeekdayLabel(visitInstant);
+  const parkWeekdayInsight = getVisitDayInsight(
+    options?.parkWeekdayInsights,
+    dayOfWeek
+  );
+
+  const visitContext: VisitDayContext = {
+    dayOfWeek,
+    dayLabel,
+    weekdayPatternsByRide: options?.weekdayPatternsByRide,
+    parkWeekdayInsight,
+  };
+
   const slots = assignHistoricalSlots(
     selectedRides,
     intelligenceByRide,
     preferences.arrivalHour,
-    preferences.departureHour
+    preferences.departureHour,
+    visitContext
   );
 
   const scheduled: TouringPlanItem[] = [];
@@ -158,9 +194,11 @@ function generateFullDayPlan(
   let lunchTaken = !preferences.lunchBreak;
 
   const lunchHour = preferences.lunchBreak
-    ? findPeakLunchHour(
+    ? findPeakLunchHourForVisit(
         selectedRides,
         intelligenceByRide,
+        options?.weekdayPatternsByRide,
+        dayOfWeek,
         preferences.arrivalHour,
         preferences.lunchHour ?? 12
       )
@@ -240,7 +278,10 @@ function generateFullDayPlan(
       intel,
       slot.hour,
       ride.wait_time,
-      preferences.expressPass
+      preferences.expressPass,
+      slot.usesWeekdayData
+        ? options?.weekdayPatternsByRide?.[slot.rideId]?.[dayOfWeek]
+        : undefined
     );
 
     const delayedFromIdeal = rideStart > slot.timeMinutes + 20;
@@ -287,9 +328,12 @@ function generateFullDayPlan(
   );
   const missedMustDo = mustDoIds.filter((id) => !scheduledIds.has(id));
 
-  let summary = `Full-day plan · historical best times · ${preferences.arrivalHour}:00–${preferences.departureHour}:00`;
+  let summary = `Full-day plan for ${dayLabel} · historical best times · ${preferences.arrivalHour}:00–${preferences.departureHour}:00`;
+  if (parkWeekdayInsight) {
+    summary += ` · ${parkWeekdayInsight.message}`;
+  }
   if (missedMustDo.length > 0) {
-    summary = `Full-day plan · ${scheduledIds.size} of ${mustDoIds.length} rides fit — extend departure to include all.`;
+    summary = `Full-day plan for ${dayLabel} · ${scheduledIds.size} of ${mustDoIds.length} rides fit — extend departure to include all.`;
   }
 
   return {
@@ -456,6 +500,7 @@ export function computePlanAdjustments(
 export const DEFAULT_TOURING_PREFERENCES: TouringPlanPreferences = {
   planMode: "live",
   liveWindowHours: 2,
+  visitDate: "",
   arrivalHour: 9,
   departureHour: 18,
   mustDoRideIds: [],

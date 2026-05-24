@@ -189,6 +189,21 @@ export interface RideIntelligence {
   learningNote: string | null;
 }
 
+export interface WeekdayCrowdInsight {
+  dayOfWeek: number;
+  label: string;
+  averageWait: number;
+  sampleDays: number;
+  vsOverallPercent: number;
+  crowdLevel: "lighter" | "typical" | "busier";
+  message: string;
+}
+
+export type WeekdayPatternsByRide = Record<
+  number,
+  Record<number, { hour: number; label: string; average: number; count: number }[]>
+>;
+
 export interface ParkRecommendations {
   bestRightNow: RideRecommendation[];
   greatTimeToRide: RideRecommendation[];
@@ -197,6 +212,8 @@ export interface ParkRecommendations {
   expectedToRiseSoon: RideRecommendation[];
   byRideId: Record<number, RideIntelligence>;
   dataMaturity: DataMaturityMetrics;
+  weekdayPatternsByRide: WeekdayPatternsByRide;
+  parkWeekdayInsights: Record<number, WeekdayCrowdInsight>;
   generatedAt: string;
 }
 
@@ -214,6 +231,8 @@ export interface TouringPlanPreferences {
   planMode: TouringPlanMode;
   /** Hours ahead to optimize when planMode is live */
   liveWindowHours: number;
+  /** ISO date YYYY-MM-DD for fullday mode — weekday patterns derived from this */
+  visitDate: string;
   arrivalHour: number;
   departureHour: number;
   mustDoRideIds: number[];

@@ -1,5 +1,8 @@
 import type { RideWithLiveData, RideIntelligence } from "@/types";
+import type { HourBucket } from "@/lib/time-buckets";
+import type { WeekdayPatternsByRide, WeekdayCrowdInsight } from "@/types";
 import { formatHourMinute } from "@/utils/wait-time";
+import { getPatternForVisitDay } from "@/lib/weekday-analytics";
 
 export interface HistoricalSlot {
   rideId: number;
@@ -11,16 +14,24 @@ export interface HistoricalSlot {
   label: string;
   reason: string;
   rank: number;
+  usesWeekdayData: boolean;
+}
+
+export interface VisitDayContext {
+  dayOfWeek: number;
+  dayLabel: string;
+  weekdayPatternsByRide?: WeekdayPatternsByRide;
+  parkWeekdayInsight?: WeekdayCrowdInsight | null;
 }
 
 function hoursInWindow(
-  intel: RideIntelligence | undefined,
+  pattern: HourBucket[],
   arrivalHour: number,
   departureHour: number
 ) {
-  if (!intel?.hourlyPattern.length) return [];
+  if (!pattern.length) return [];
 
-  return intel.hourlyPattern
+  return pattern
     .filter((h) => h.hour >= arrivalHour && h.hour < departureHour)
     .sort((a, b) => a.average - b.average);
 }
@@ -43,14 +54,26 @@ export function rankHistoricalHoursForRide(
   ride: RideWithLiveData,
   intel: RideIntelligence | undefined,
   arrivalHour: number,
-  departureHour: number
+  departureHour: number,
+  visitContext?: VisitDayContext
 ): HistoricalSlot[] {
-  const ranked = hoursInWindow(intel, arrivalHour, departureHour);
+  const fallbackPattern = intel?.hourlyPattern ?? [];
+  const { pattern, usesWeekday, sampleDays } = visitContext?.weekdayPatternsByRide
+    ? getPatternForVisitDay(
+        ride.ride_id,
+        visitContext.dayOfWeek,
+        visitContext.weekdayPatternsByRide,
+        fallbackPattern
+      )
+    : { pattern: fallbackPattern, usesWeekday: false, sampleDays: 0 };
+
+  const ranked = hoursInWindow(pattern, arrivalHour, departureHour);
   const peakAverage =
-    intel?.hourlyPattern.reduce(
-      (max, h) => (h.average > max ? h.average : max),
-      0
-    ) ?? ride.wait_time;
+    pattern.reduce((max, h) => (h.average > max ? h.average : max), 0) ||
+    intel?.hourlyPattern.reduce((max, h) => (h.average > max ? h.average : max), 0) ||
+    ride.wait_time;
+
+  const dayLabel = visitContext?.dayLabel ?? "Typical";
 
   if (ranked.length === 0) {
     const bestMinutes =
@@ -69,10 +92,13 @@ export function rankHistoricalHoursForRide(
         historicalAverage: avg,
         peakAverage,
         label: formatHourMinute(hour, minute),
-        reason: intel?.bestTimeToRide
-          ? `Historically best around ${intel.bestTimeToRide} (${avg}m avg)`
-          : `Scheduled at ${formatHourMinute(hour, minute)}`,
+        reason: usesWeekday
+          ? `On ${dayLabel}s, best around ${formatHourMinute(hour, minute)} (${avg}m avg, ${sampleDays} days)`
+          : intel?.bestTimeToRide
+            ? `Historically best around ${intel.bestTimeToRide} (${avg}m avg)`
+            : `Scheduled at ${formatHourMinute(hour, minute)}`,
         rank: 0,
+        usesWeekdayData: usesWeekday,
       },
     ];
   }
@@ -83,11 +109,20 @@ export function rankHistoricalHoursForRide(
         ? Math.round(((peakAverage - entry.average) / peakAverage) * 100)
         : 0;
 
-    let reason = `Historically ${entry.average}m avg at ${entry.label}`;
-    if (index === 0 && savings >= 10) {
+    let reason: string;
+    if (usesWeekday && index === 0) {
+      reason =
+        savings >= 10
+          ? `On ${dayLabel}s, best at ${entry.label} — ~${savings}% below peak (${peakAverage}m)`
+          : `On ${dayLabel}s, lowest typical wait at ${entry.label} (${entry.average}m avg)`;
+    } else if (index === 0 && savings >= 10) {
       reason = `Best time of day — ~${savings}% lower than peak (${peakAverage}m)`;
     } else if (index === 0) {
       reason = `Lowest typical wait window (${entry.average}m avg)`;
+    } else {
+      reason = usesWeekday
+        ? `On ${dayLabel}s, ${entry.average}m avg at ${entry.label}`
+        : `Historically ${entry.average}m avg at ${entry.label}`;
     }
 
     return {
@@ -100,19 +135,17 @@ export function rankHistoricalHoursForRide(
       label: entry.label,
       reason,
       rank: index,
+      usesWeekdayData: usesWeekday,
     };
   });
 }
 
-/**
- * Assign each ride a non-conflicting optimal hour using historical patterns.
- * Rides with the biggest peak-to-best spread get first pick of their ideal slot.
- */
 export function assignHistoricalSlots(
   rides: RideWithLiveData[],
   intelligenceByRide: Record<number, RideIntelligence>,
   arrivalHour: number,
-  departureHour: number
+  departureHour: number,
+  visitContext?: VisitDayContext
 ): HistoricalSlot[] {
   const candidates = rides.map((ride) => ({
     ride,
@@ -121,15 +154,14 @@ export function assignHistoricalSlots(
       ride,
       intelligenceByRide[ride.ride_id],
       arrivalHour,
-      departureHour
+      departureHour,
+      visitContext
     ),
   }));
 
   candidates.sort((a, b) => {
-    const spreadA =
-      (a.slots[0]?.peakAverage ?? 0) - (a.slots[0]?.historicalAverage ?? 0);
-    const spreadB =
-      (b.slots[0]?.peakAverage ?? 0) - (b.slots[0]?.historicalAverage ?? 0);
+    const spreadA = effectiveAssignmentSpread(a.slots, visitContext);
+    const spreadB = effectiveAssignmentSpread(b.slots, visitContext);
     return spreadB - spreadA;
   });
 
@@ -140,7 +172,6 @@ export function assignHistoricalSlots(
     let chosen = slots.find((s) => !usedHours.has(s.hour));
 
     if (!chosen) {
-      // All ideal hours taken — use next-best or offset by 30 min
       for (const slot of slots) {
         const offsetHour = slot.hour;
         const halfHourKey = offsetHour * 60 + 30;
@@ -169,6 +200,7 @@ export function assignHistoricalSlots(
         label: formatHourMinute(arrivalHour, 0),
         reason: "Scheduled in available window",
         rank: 0,
+        usesWeekdayData: false,
       };
     } else {
       usedHours.add(chosen.hour);
@@ -180,14 +212,79 @@ export function assignHistoricalSlots(
   return assignments.sort((a, b) => a.timeMinutes - b.timeMinutes);
 }
 
+/** On busier weekdays, slightly favor rides whose best window is early morning. */
+function effectiveAssignmentSpread(
+  slots: HistoricalSlot[],
+  visitContext?: VisitDayContext
+): number {
+  const best = slots[0];
+  if (!best) return 0;
+
+  let spread = best.peakAverage - best.historicalAverage;
+  if (
+    visitContext?.parkWeekdayInsight?.crowdLevel === "busier" &&
+    best.hour <= 10
+  ) {
+    spread += 10;
+  }
+  return spread;
+}
+
 export function estimateHistoricalWait(
   intel: RideIntelligence | undefined,
   hour: number,
   fallback: number,
-  expressPass: boolean
+  expressPass: boolean,
+  weekdayPattern?: HourBucket[]
 ): number {
-  const entry = intel?.hourlyPattern.find((h) => h.hour === hour);
+  const entry =
+    weekdayPattern?.find((h) => h.hour === hour) ??
+    intel?.hourlyPattern.find((h) => h.hour === hour);
   let wait = entry?.average ?? intel?.bestTimeAverage ?? fallback;
   if (expressPass) wait = Math.round(wait * 0.4);
   return Math.max(0, wait);
+}
+
+export function findPeakLunchHourForVisit(
+  rides: RideWithLiveData[],
+  intelligenceByRide: Record<number, RideIntelligence>,
+  weekdayPatternsByRide: WeekdayPatternsByRide | undefined,
+  dayOfWeek: number,
+  arrivalHour: number,
+  preferredLunchHour: number
+): number {
+  const hourTotals = new Map<number, number>();
+  const hourCounts = new Map<number, number>();
+
+  for (const ride of rides) {
+    const intel = intelligenceByRide[ride.ride_id];
+    const { pattern } = weekdayPatternsByRide
+      ? getPatternForVisitDay(
+          ride.ride_id,
+          dayOfWeek,
+          weekdayPatternsByRide,
+          intel?.hourlyPattern ?? []
+        )
+      : { pattern: intel?.hourlyPattern ?? [] };
+
+    for (const entry of pattern) {
+      if (entry.hour < arrivalHour) continue;
+      hourTotals.set(entry.hour, (hourTotals.get(entry.hour) ?? 0) + entry.average);
+      hourCounts.set(entry.hour, (hourCounts.get(entry.hour) ?? 0) + 1);
+    }
+  }
+
+  let peakHour = preferredLunchHour;
+  let peakAvg = -1;
+
+  for (const [hour, total] of hourTotals.entries()) {
+    const count = hourCounts.get(hour) ?? 1;
+    const avg = total / count;
+    if (avg > peakAvg && hour >= arrivalHour) {
+      peakAvg = avg;
+      peakHour = hour;
+    }
+  }
+
+  return Math.max(preferredLunchHour, peakHour);
 }
