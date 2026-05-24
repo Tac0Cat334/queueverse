@@ -220,19 +220,26 @@ export interface TouringPlanPreferences {
 export interface TouringPlanItem {
   time: string;
   timeMinutes: number;
-  type: "ride" | "break";
+  type: "ride" | "break" | "travel";
   rideId?: number;
   rideName?: string;
   land?: string;
   estimatedWait?: number;
+  predictedWait?: number;
+  vsAveragePercent?: number | null;
   label: string;
   reason: string;
+  priority?: "high" | "normal" | "flexible";
+  priorityLabel?: string;
+  isOpen?: boolean;
+  travelMinutes?: number;
 }
 
 export interface TouringPlan {
   items: TouringPlanItem[];
   preferences: TouringPlanPreferences;
   missedMustDo: number[];
+  summary?: string;
   generatedAt: string;
 }
 
