@@ -1,6 +1,6 @@
 import { Suspense } from "react";
 import { IntelligenceHub } from "@/components/intelligence/IntelligenceHub";
-import { fetchLiveQueueTimes, flattenRides } from "@/lib/queue-times";
+import { fetchLiveQueueTimes, flattenRides, stampFetchTime } from "@/lib/queue-times";
 import { pageTitle } from "@/lib/brand";
 
 export const metadata = {
@@ -10,8 +10,9 @@ export const metadata = {
 };
 
 async function IntelligenceContent() {
-  const data = await fetchLiveQueueTimes();
-  const rides = flattenRides(data);
+  const fetchedAt = new Date().toISOString();
+  const data = await fetchLiveQueueTimes({ noStore: true });
+  const rides = stampFetchTime(flattenRides(data), fetchedAt);
   return <IntelligenceHub initialRides={rides} />;
 }
 
@@ -43,4 +44,4 @@ export default function IntelligencePage() {
   );
 }
 
-export const revalidate = 60;
+export const dynamic = "force-dynamic";

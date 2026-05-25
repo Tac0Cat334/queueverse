@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { ArrowLeft, RefreshCw, Brain } from "lucide-react";
 import type { RideWithLiveData, ParkRecommendations } from "@/types";
@@ -58,11 +58,7 @@ export function IntelligenceHub({ initialRides }: IntelligenceHubProps) {
     }
   }, []);
 
-  useEffect(() => {
-    fetchIntelligence();
-  }, [fetchIntelligence]);
-
-  useAutoRefresh(() => fetchIntelligence(true), REFRESH_INTERVAL_MS);
+  useAutoRefresh(() => fetchIntelligence(false), REFRESH_INTERVAL_MS);
 
   const parkIntel = computeParkIntelligence(rides);
   const topPick = recommendations.bestRightNow[0];

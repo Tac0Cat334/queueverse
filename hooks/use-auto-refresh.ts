@@ -3,11 +3,18 @@
 import { useEffect, useState, useCallback } from "react";
 import { REFRESH_INTERVAL_MS } from "@/lib/constants";
 
-export function useAutoRefresh(callback: () => void, intervalMs = REFRESH_INTERVAL_MS) {
+export function useAutoRefresh(
+  callback: () => void,
+  intervalMs = REFRESH_INTERVAL_MS,
+  options?: { runOnMount?: boolean }
+) {
+  const runOnMount = options?.runOnMount !== false;
+
   useEffect(() => {
+    if (runOnMount) callback();
     const id = setInterval(callback, intervalMs);
     return () => clearInterval(id);
-  }, [callback, intervalMs]);
+  }, [callback, intervalMs, runOnMount]);
 }
 
 export function useAnimatedCounter(

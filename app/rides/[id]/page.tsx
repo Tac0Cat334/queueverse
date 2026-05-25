@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { RideDetail } from "@/components/RideDetail";
-import { fetchLiveQueueTimes, flattenRides } from "@/lib/queue-times";
+import { fetchLiveQueueTimes, flattenRides, stampFetchTime } from "@/lib/queue-times";
 import { BRAND } from "@/lib/brand";
 
 interface PageProps {
@@ -32,8 +32,9 @@ export default async function RidePage({ params }: PageProps) {
 
   let ride;
   try {
-    const data = await fetchLiveQueueTimes();
-    const rides = flattenRides(data);
+    const fetchedAt = new Date().toISOString();
+    const data = await fetchLiveQueueTimes({ noStore: true });
+    const rides = stampFetchTime(flattenRides(data), fetchedAt);
     ride = rides.find((r) => r.ride_id === rideId);
   } catch {
     notFound();
@@ -44,4 +45,4 @@ export default async function RidePage({ params }: PageProps) {
   return <RideDetail ride={ride} />;
 }
 
-export const revalidate = 60;
+export const dynamic = "force-dynamic";

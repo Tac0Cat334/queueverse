@@ -18,9 +18,9 @@ export async function GET(request: Request) {
   }
 
   try {
-    const data = await fetchLiveQueueTimes();
-    const rides = flattenRides(data);
     const timestamp = roundToFiveMinutes(new Date());
+    const data = await fetchLiveQueueTimes({ noStore: true });
+    const rides = flattenRides(data);
 
     await syncWaitTimeSnapshots(rides, timestamp);
 

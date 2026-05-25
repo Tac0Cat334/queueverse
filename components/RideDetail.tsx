@@ -77,15 +77,17 @@ export function RideDetail({ ride: initialRide }: RideDetailProps) {
     }
   }, [ride.ride_id]);
 
-  const refreshAll = useCallback(async () => {
-    await Promise.all([refreshLive(), fetchHistory(false)]);
+  const refreshAll = useCallback(async (showLoading = false) => {
+    await Promise.all([refreshLive(), fetchHistory(showLoading)]);
   }, [refreshLive, fetchHistory]);
 
-  useEffect(() => {
-    fetchHistory(true);
-  }, [fetchHistory]);
+  useAutoRefresh(() => refreshAll(false), REFRESH_INTERVAL_MS, {
+    runOnMount: false,
+  });
 
-  useAutoRefresh(refreshAll, REFRESH_INTERVAL_MS);
+  useEffect(() => {
+    refreshAll(true);
+  }, [refreshAll]);
 
   const analytics = useMemo(
     () => computeRideAnalytics(historyRecords, "30d"),

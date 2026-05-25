@@ -9,9 +9,14 @@ on:
 jobs:
   sync:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Sync Epic Universe wait times
         run: |
-          curl -sf --retry 2 --retry-delay 10 \
+          status=$(curl -sS --retry 3 --retry-delay 15 --retry-all-errors \
+            -o /tmp/sync-response.json -w "%{http_code}" \
             -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
-            "https://queueverse.vercel.app/api/cron/sync-wait-times"
+            "https://queueverse.vercel.app/api/cron/sync-wait-times")
+          echo "HTTP status: $status"
+          cat /tmp/sync-response.json
+          test "$status" = "200"

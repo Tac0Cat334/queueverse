@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback, useEffect } from "react";
+import { useState, useMemo, useCallback } from "react";
 import { Search, RefreshCw, Star } from "lucide-react";
 import type { RideWithLiveData, SortOption, RideInsight, WaitDropAlert, RideIntelligence } from "@/types";
 import { Hero } from "./Hero";
@@ -53,46 +53,37 @@ export function Dashboard({ initialRides }: DashboardProps) {
   const debouncedSearch = useDebouncedValue(search);
   const { favorites, toggleFavorite, isFavorite } = useFavorites();
 
-  const fetchIntelligence = useCallback(async () => {
-    try {
-      const res = await fetch("/api/intelligence", { cache: "no-store" });
-      const data = await res.json();
-      if (data.recommendations) {
-        setIntelligence(data.recommendations);
-        const mapped: Record<number, RideInsight> = {};
-        for (const [id, intel] of Object.entries(
-          data.recommendations.byRideId as Record<string, RideIntelligence>
-        )) {
-          mapped[Number(id)] = intelligenceToInsight(intel);
-        }
-        setInsights(mapped);
-      }
-    } catch {
-      // optional
-    } finally {
-      setIntelLoading(false);
-    }
-  }, []);
-
   const refresh = useCallback(async () => {
     setIsRefreshing(true);
     try {
-      const [liveRes] = await Promise.all([
+      const [liveRes, intelRes] = await Promise.all([
         fetch("/api/live", { cache: "no-store" }),
-        fetchIntelligence(),
+        fetch("/api/intelligence", { cache: "no-store" }),
       ]);
-      if (!liveRes.ok) return;
-
-      const data = await liveRes.json();
-      if (data.rides) setRides(data.rides);
+      if (liveRes.ok) {
+        const data = await liveRes.json();
+        if (data.rides) setRides(data.rides);
+      }
+      if (intelRes.ok) {
+        const data = await intelRes.json();
+        if (data.recommendations) {
+          setIntelligence(data.recommendations);
+          const mapped: Record<number, RideInsight> = {};
+          for (const [id, intel] of Object.entries(
+            data.recommendations.byRideId as Record<string, RideIntelligence>
+          )) {
+            mapped[Number(id)] = intelligenceToInsight(intel);
+          }
+          setInsights(mapped);
+        }
+      }
+    } catch {
+      // keep last known data
     } finally {
       setIsRefreshing(false);
+      setIntelLoading(false);
     }
-  }, [fetchIntelligence]);
-
-  useEffect(() => {
-    fetchIntelligence();
-  }, [fetchIntelligence]);
+  }, []);
 
   useAutoRefresh(refresh, REFRESH_INTERVAL_MS);
 

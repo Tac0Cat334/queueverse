@@ -7,7 +7,9 @@ export async function fetchLiveQueueTimes(
 ): Promise<QueueTimesResponse> {
   const res = await fetch(
     `${QUEUE_TIMES_BASE_URL}/parks/${EPIC_UNIVERSE_PARK_ID}/queue_times.json`,
-    options?.noStore ? { cache: "no-store" } : { next: { revalidate: 60 } }
+    options?.noStore === false
+      ? { next: { revalidate: 60 } }
+      : { cache: "no-store" }
   );
 
   if (!res.ok) {
@@ -35,6 +37,14 @@ export function flattenRides(data: QueueTimesResponse): RideWithLiveData[] {
       last_updated: ride.last_updated,
     }))
   );
+}
+
+/** Stamp rides with when we fetched live data (Queue-Times last_updated can lag). */
+export function stampFetchTime(
+  rides: RideWithLiveData[],
+  fetchedAt = new Date().toISOString()
+): RideWithLiveData[] {
+  return rides.map((ride) => ({ ...ride, last_updated: fetchedAt }));
 }
 
 export function getLatestUpdateTime(rides: RideWithLiveData[]): string | null {

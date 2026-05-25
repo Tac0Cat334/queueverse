@@ -1,10 +1,11 @@
 import { Suspense } from "react";
 import { Dashboard, DashboardSkeleton } from "@/components/Dashboard";
-import { fetchLiveQueueTimes, flattenRides } from "@/lib/queue-times";
+import { fetchLiveQueueTimes, flattenRides, stampFetchTime } from "@/lib/queue-times";
 
 async function DashboardContent() {
-  const data = await fetchLiveQueueTimes();
-  const rides = flattenRides(data);
+  const fetchedAt = new Date().toISOString();
+  const data = await fetchLiveQueueTimes({ noStore: true });
+  const rides = stampFetchTime(flattenRides(data), fetchedAt);
   return <Dashboard initialRides={rides} />;
 }
 
@@ -16,4 +17,4 @@ export default function HomePage() {
   );
 }
 
-export const revalidate = 60;
+export const dynamic = "force-dynamic";
