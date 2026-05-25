@@ -103,8 +103,10 @@ export interface RideInsight {
 
 export interface ChartDataPoint {
   timestamp: string;
-  wait_time: number;
+  /** null when the ride was closed at collection time */
+  wait_time: number | null;
   label: string;
+  is_open?: boolean;
   historical_avg?: number;
 }
 

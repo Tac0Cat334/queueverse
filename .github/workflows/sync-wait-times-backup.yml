@@ -1,9 +1,9 @@
-name: Sync wait times
+name: Sync wait times (offset backup)
 
+# Runs 2 minutes after the primary workflow to catch missed GitHub schedule slots
 on:
   schedule:
-    # Every 5 minutes — keeps Supabase filled for daily charts
-    - cron: "*/5 * * * *"
+    - cron: "2-59/5 * * * *"
   workflow_dispatch:
 
 concurrency:
@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Sync Epic Universe wait times
+      - name: Sync Epic Universe wait times (backup)
         run: |
           status=$(curl -sS --retry 3 --retry-delay 15 --retry-all-errors \
             -o /tmp/sync-response.json -w "%{http_code}" \

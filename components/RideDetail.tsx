@@ -11,7 +11,8 @@ import {
   buildHistoricalAverageSeries,
 } from "@/lib/ride-intelligence";
 import { buildTodayChartData } from "@/lib/daily-chart";
-import { formatParkDateLabel } from "@/lib/park-time";
+import { formatParkDateLabel, isWithinParkDay } from "@/lib/park-time";
+import { SyncHealthBadge } from "./SyncHealthBadge";
 import { getWaitLevel, getWaitLevelClass, formatWaitTime, cn } from "@/utils/wait-time";
 import { RelativeTime } from "./RelativeTime";
 import { FavoriteButton } from "./FavoriteButton";
@@ -120,7 +121,12 @@ export function RideDetail({ ride: initialRide }: RideDetailProps) {
     }));
   }, [allRecords, ride, historyRecords]);
 
-  const todaySnapshotCount = todayChartData.length;
+  const todayParkRecords = useMemo(
+    () => allRecords.filter((r) => isWithinParkDay(r.timestamp)),
+    [allRecords]
+  );
+  const todaySnapshotCount = todayParkRecords.filter((r) => r.is_open).length;
+  const closedSnapshotCount = todayParkRecords.filter((r) => !r.is_open).length;
 
   const trend = useMemo(
     () =>
@@ -314,9 +320,12 @@ export function RideDetail({ ride: initialRide }: RideDetailProps) {
         <h2 className="mb-1 text-sm font-medium text-[var(--fg)]">
           Today&apos;s wait times
         </h2>
-        <p className="mb-4 text-xs text-[var(--fg-muted)]">
-          {formatParkDateLabel()} · Full day history · Updates every 5 min
-        </p>
+        <div className="mb-4 flex flex-wrap items-end justify-between gap-2">
+          <p className="text-xs text-[var(--fg-muted)]">
+            {formatParkDateLabel()} · Full day history · Updates every 5 min
+          </p>
+          <SyncHealthBadge compact className="text-right" />
+        </div>
         {loading ? (
           <div className="skeleton h-72 rounded-2xl" />
         ) : (
@@ -325,6 +334,7 @@ export function RideDetail({ ride: initialRide }: RideDetailProps) {
             currentWait={ride.is_open ? ride.wait_time : undefined}
             isOpen={ride.is_open}
             snapshotCount={todaySnapshotCount}
+            closedSnapshotCount={closedSnapshotCount}
             historicalAverage={intelligence.historicalAverage}
           />
         )}

@@ -10,6 +10,7 @@ import {
   Area,
   AreaChart,
   ReferenceDot,
+  ReferenceArea,
   Line,
 } from "recharts";
 import type { ChartDataPoint } from "@/types";
@@ -29,10 +30,40 @@ interface EnrichedPoint extends ChartDataPoint {
 }
 
 function averageWait(points: EnrichedPoint[]): number {
-  if (points.length === 0) return 0;
-  return Math.round(
-    points.reduce((s, p) => s + p.wait_time, 0) / points.length
+  const open = points.filter(
+    (p) => p.is_open !== false && p.wait_time !== null
   );
+  if (open.length === 0) return 0;
+  return Math.round(
+    open.reduce((s, p) => s + (p.wait_time ?? 0), 0) / open.length
+  );
+}
+
+function getClosedSpans(
+  points: EnrichedPoint[]
+): { start: number; end: number }[] {
+  const spans: { start: number; end: number }[] = [];
+  let spanStart: number | null = null;
+
+  for (let i = 0; i < points.length; i++) {
+    const closed = points[i].is_open === false;
+    if (closed) {
+      if (spanStart === null) spanStart = points[i].timeMs;
+    } else if (spanStart !== null) {
+      spans.push({ start: spanStart, end: points[i].timeMs });
+      spanStart = null;
+    }
+  }
+
+  if (spanStart !== null && points.length > 0) {
+    const last = points[points.length - 1];
+    spans.push({
+      start: spanStart,
+      end: last.timeMs + 5 * 60 * 1000,
+    });
+  }
+
+  return spans;
 }
 
 function waitStatus(value: number, avg: number): string {
@@ -68,14 +99,15 @@ function PremiumTooltip({
   if (!active || !payload?.length) return null;
 
   const point = payload[0];
+  const row = point.payload as EnrichedPoint | undefined;
+  const isClosed = row?.is_open === false;
   const value = point.value;
   const time =
-    point.payload?.displayLabel ??
-    (point.payload?.timeMs
-      ? formatParkTime(point.payload.timeMs)
-      : point.payload?.label ?? "");
-  const referenceAvg = avg ?? point.payload?.average ?? 0;
-  const status = waitStatus(value, referenceAvg);
+    row?.displayLabel ??
+    (row?.timeMs ? formatParkTime(row.timeMs) : row?.label ?? "");
+  const referenceAvg = avg ?? row?.historical_avg ?? 0;
+  const status =
+    !isClosed && value != null ? waitStatus(value, referenceAvg) : "";
 
   return (
     <div
@@ -89,11 +121,24 @@ function PremiumTooltip({
       <p className="text-[11px] font-medium tracking-wide text-[var(--fg-muted)]">
         {time}
       </p>
-      <p className="metric mt-0.5 text-base font-semibold text-[var(--fg)]">
-        {value} {valueLabel}
-      </p>
-      {status && (
-        <p className="mt-1 text-[10px] text-[var(--fg-secondary)]">{status}</p>
+      {isClosed ? (
+        <>
+          <p className="metric mt-0.5 text-base font-semibold text-[var(--fg-muted)]">
+            Closed
+          </p>
+          <p className="mt-1 text-[10px] text-[var(--fg-secondary)]">
+            Snapshot collected · ride reported closed by source
+          </p>
+        </>
+      ) : (
+        <>
+          <p className="metric mt-0.5 text-base font-semibold text-[var(--fg)]">
+            {value} {valueLabel}
+          </p>
+          {status && (
+            <p className="mt-1 text-[10px] text-[var(--fg-secondary)]">{status}</p>
+          )}
+        </>
       )}
     </div>
   );
@@ -160,6 +205,7 @@ interface DailyWaitChartProps {
   currentWait?: number;
   isOpen?: boolean;
   snapshotCount?: number;
+  closedSnapshotCount?: number;
   historicalAverage?: number | null;
 }
 
@@ -168,6 +214,7 @@ export function DailyWaitChart({
   currentWait,
   isOpen,
   snapshotCount = 0,
+  closedSnapshotCount = 0,
   historicalAverage,
 }: DailyWaitChartProps) {
   const colors = useChartColors();
@@ -192,23 +239,44 @@ export function DailyWaitChart({
 
   const avg = useMemo(() => averageWait(chartData), [chartData]);
 
+  const openPoints = useMemo(
+    () =>
+      chartData.filter(
+        (p) => p.is_open !== false && p.wait_time !== null
+      ),
+    [chartData]
+  );
+
+  const closedSpans = useMemo(
+    () => getClosedSpans(chartData),
+    [chartData]
+  );
+
+  const closedMarkers = useMemo(
+    () => chartData.filter((p) => p.is_open === false),
+    [chartData]
+  );
+
   const highlights = useMemo(() => {
-    if (chartData.length < 2) return { peak: null, low: null, latest: null };
-    const peak = chartData.reduce((max, p) =>
-      p.wait_time > max.wait_time ? p : max
+    if (openPoints.length < 2) {
+      return { peak: null, low: null, latest: chartData[chartData.length - 1] ?? null };
+    }
+    const peak = openPoints.reduce((max, p) =>
+      (p.wait_time ?? 0) > (max.wait_time ?? 0) ? p : max
     );
-    const low = chartData.reduce((min, p) =>
-      p.wait_time < min.wait_time ? p : min
+    const low = openPoints.reduce((min, p) =>
+      (p.wait_time ?? 0) < (min.wait_time ?? 0) ? p : min
     );
     const latest = chartData[chartData.length - 1];
     return { peak, low, latest };
-  }, [chartData]);
+  }, [chartData, openPoints]);
 
   if (data.length === 0) {
     return (
       <div className="card flex h-56 flex-col items-center justify-center gap-2 px-6 text-center sm:h-64">
         <p className="text-sm text-[var(--fg-muted)]">
-          Today&apos;s trend builds as data is collected every 5 minutes.
+          Today&apos;s trend builds as data is collected every 5 minutes. Gray
+          bands mean we collected a snapshot but the ride was reported closed.
         </p>
         <p className="text-xs text-[var(--fg-muted)]">
           {parkDateLabel} · Eastern time
@@ -218,8 +286,9 @@ export function DailyWaitChart({
   }
 
   const yMax = Math.max(
-    ...chartData.map((d) => d.wait_time),
-    ...chartData.map((d) => d.historical_avg ?? 0)
+    ...openPoints.map((d) => d.wait_time ?? 0),
+    ...chartData.map((d) => d.historical_avg ?? 0),
+    0
   );
   const yDomain: [number, number] = [0, Math.max(yMax + 10, 15)];
 
@@ -263,7 +332,9 @@ export function DailyWaitChart({
         <div className="text-right text-[10px] leading-relaxed text-[var(--fg-muted)]">
           {snapshotCount > 0 && (
             <p>
-              {snapshotCount} reading{snapshotCount === 1 ? "" : "s"}
+              {snapshotCount} open
+              {closedSnapshotCount > 0 &&
+                ` · ${closedSnapshotCount} closed`}
             </p>
           )}
           <p>{parkDateLabel}</p>
@@ -329,6 +400,19 @@ export function DailyWaitChart({
             animationDuration={180}
           />
 
+          {closedSpans.map((span) => (
+            <ReferenceArea
+              key={`${span.start}-${span.end}`}
+              x1={span.start}
+              x2={span.end}
+              y1={0}
+              y2={yDomain[1]}
+              fill={colors.closed}
+              strokeOpacity={0}
+              ifOverflow="hidden"
+            />
+          ))}
+
           <Area
             type="monotone"
             dataKey="wait_time"
@@ -336,6 +420,7 @@ export function DailyWaitChart({
             strokeWidth={1.75}
             fill={`url(#fill-${fillId})`}
             dot={false}
+            connectNulls={false}
             activeDot={{
               r: 4.5,
               fill: colors.line,
@@ -346,6 +431,22 @@ export function DailyWaitChart({
             animationEasing="ease-out"
             isAnimationActive
           />
+
+          {closedMarkers.map((point) => (
+            <ReferenceDot
+              key={point.timestamp}
+              x={point.timeMs}
+              y={3}
+              shape={(props) => (
+                <HighlightMarker
+                  {...props}
+                  color={colors.closedDot}
+                  stroke={colors.tooltipBg}
+                />
+              )}
+              ifOverflow="hidden"
+            />
+          ))}
 
           {hasHistoricalOverlay && (
             <Line
@@ -364,7 +465,7 @@ export function DailyWaitChart({
           {showPeak && highlights.peak && (
             <ReferenceDot
               x={highlights.peak.timeMs}
-              y={highlights.peak.wait_time}
+              y={highlights.peak.wait_time ?? 0}
               shape={(props) => (
                 <HighlightMarker
                   {...props}
@@ -379,7 +480,7 @@ export function DailyWaitChart({
           {showLow && highlights.low && (
             <ReferenceDot
               x={highlights.low.timeMs}
-              y={highlights.low.wait_time}
+              y={highlights.low.wait_time ?? 0}
               shape={(props) => (
                 <HighlightMarker
                   {...props}
@@ -391,7 +492,9 @@ export function DailyWaitChart({
             />
           )}
 
-          {highlights.latest && (
+          {highlights.latest &&
+            highlights.latest.wait_time !== null &&
+            highlights.latest.is_open !== false && (
             <ReferenceDot
               x={highlights.latest.timeMs}
               y={highlights.latest.wait_time}
@@ -432,6 +535,15 @@ export function DailyWaitChart({
           <span className="inline-flex items-center gap-1.5">
             <span className="inline-block h-px w-3 border-t border-dashed border-[var(--fg-muted)]" />
             Historical avg
+          </span>
+        )}
+        {closedSnapshotCount > 0 && (
+          <span className="inline-flex items-center gap-1.5">
+            <span
+              className="inline-block h-2 w-4 rounded-sm"
+              style={{ background: colors.closed }}
+            />
+            Closed (collected)
           </span>
         )}
       </div>

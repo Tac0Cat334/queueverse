@@ -84,5 +84,7 @@ export function useChartColors() {
     glow: isDark ? "#fafafa" : "#18181b",
     low: isDark ? "#4ade80" : "#16a34a",
     high: isDark ? "#f87171" : "#dc2626",
+    closed: isDark ? "rgba(113,113,122,0.35)" : "rgba(161,161,170,0.4)",
+    closedDot: isDark ? "#71717a" : "#a1a1aa",
   };
 }

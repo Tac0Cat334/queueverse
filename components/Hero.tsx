@@ -2,6 +2,7 @@
 
 import { BRAND } from "@/lib/brand";
 import { RelativeTime } from "./RelativeTime";
+import { SyncHealthBadge } from "./SyncHealthBadge";
 
 interface HeroProps {
   lastUpdated: string | null;
@@ -21,11 +22,14 @@ export function Hero({ lastUpdated }: HeroProps) {
           {BRAND.tagline}. {BRAND.subtitle}
         </p>
 
-        {lastUpdated && (
-          <p className="label mt-5">
-            <RelativeTime date={lastUpdated} />
-          </p>
-        )}
+        <div className="mt-5 space-y-1">
+          {lastUpdated && (
+            <p className="label">
+              <RelativeTime date={lastUpdated} />
+            </p>
+          )}
+          <SyncHealthBadge compact />
+        </div>
       </div>
     </section>
   );

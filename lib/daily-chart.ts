@@ -4,11 +4,11 @@ import { roundToFiveMinutes } from "@/lib/sync-snapshot";
 
 const BUCKET_MS = 5 * 60 * 1000;
 
-function toChartPoint(record: WaitTimeRecord): ChartDataPoint | null {
-  if (!record.is_open) return null;
+function toChartPoint(record: WaitTimeRecord): ChartDataPoint {
   return {
     timestamp: record.timestamp,
-    wait_time: record.wait_time,
+    wait_time: record.is_open ? record.wait_time : null,
+    is_open: record.is_open,
     label: formatParkTime(record.timestamp),
   };
 }
@@ -44,8 +44,7 @@ export function buildTodayChartData(
 
   const points = records
     .filter((r) => isWithinParkDay(r.timestamp, now))
-    .map(toChartPoint)
-    .filter((p): p is ChartDataPoint => p !== null);
+    .map(toChartPoint);
 
   let merged = mergeChartPoints(points);
 
@@ -58,6 +57,7 @@ export function buildTodayChartData(
         {
           timestamp: new Date(bucket).toISOString(),
           wait_time: liveRide.wait_time,
+          is_open: true,
           label: `${formatParkTime(bucket)} (live)`,
         },
       ]);

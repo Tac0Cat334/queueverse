@@ -41,20 +41,34 @@ See `.env.example` for all required keys (Supabase, Queue-Times, cron secret).
 
 Daily charts load **all points collected today** from Supabase. Data must sync every 5 minutes **without anyone on the site**.
 
-**Option A — GitHub Actions (recommended, already in repo)**
+Set up **at least two** of the options below. GitHub scheduled workflows can slip by hours on inactive repos; Vercel Hobby cron is limited to once per day.
+
+**Option A — GitHub Actions (included in repo)**
 
 1. GitHub → your repo → **Settings** → **Secrets and variables** → **Actions**
 2. Add secret: `CRON_SECRET` (same value as in Vercel)
-3. The workflow `.github/workflows/sync-wait-times.yml` runs every 5 minutes automatically
+3. Two workflows run on offset schedules: `sync-wait-times.yml` and `sync-wait-times-backup.yml`
 
-**Option B — cron-job.org (backup)**
+**Option B — cron-job.org (strongly recommended backup)**
 
 1. Sign up at [cron-job.org](https://console.cron-job.org)
-2. URL: `https://queueverse.vercel.app/api/cron/sync-wait-times`
-3. Schedule: every 5 minutes
-4. Header: `Authorization: Bearer YOUR_CRON_SECRET`
+2. Create a job:
+   - URL: `https://queueverse.vercel.app/api/cron/sync-wait-times`
+   - Schedule: every 5 minutes
+   - Request method: GET
+   - Header: `Authorization: Bearer YOUR_CRON_SECRET`
+3. Enable email alerts on failure
 
-After sync runs during park hours, opening any ride at 1 PM shows the full chart from opening through 1 PM — no need to leave a page open.
+**Option C — Vercel Cron (`vercel.json`)**
+
+Included for Pro plans. On Hobby, use Options A + B instead.
+
+**Verify sync is healthy**
+
+- Open the site — the home page shows **Chart snapshots collected X ago**
+- Or call `GET /api/sync-health` (public JSON with last snapshot time and status)
+
+After sync runs during park hours, opening any ride shows the full chart from opening through now — gray bands mean we collected data while Queue-Times reported the ride closed.
 
 ## Data
 
