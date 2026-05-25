@@ -1,25 +1,42 @@
 "use client";
 
 import { useState, useMemo, useCallback } from "react";
+import dynamic from "next/dynamic";
 import { Search, RefreshCw, Star } from "lucide-react";
-import type { RideWithLiveData, SortOption, RideInsight, WaitDropAlert, RideIntelligence } from "@/types";
+import type {
+  RideWithLiveData,
+  SortOption,
+  RideInsight,
+  WaitDropAlert,
+  RideIntelligence,
+} from "@/types";
 import { Hero } from "./Hero";
 import { ParkSummary } from "./ParkSummary";
 import { RideCard, RideCardSkeleton } from "./RideCard";
 import { DataAttribution } from "./DataAttribution";
-import { IntelligenceTeaser } from "./intelligence/IntelligenceTeaser";
 import { computeParkIntelligence } from "@/lib/park-intelligence";
 import { sortRidesWithFavoritesFilter } from "@/lib/analytics";
 import { getLatestUpdateTime } from "@/lib/queue-times";
-import { REFRESH_INTERVAL_MS } from "@/lib/constants";
-import { useAutoRefresh } from "@/hooks/use-auto-refresh";
-import { useDebouncedValue } from "@/hooks/use-auto-refresh";
+import { useLiveRides } from "@/hooks/use-live-rides";
+import { useDebouncedValue, useDeferredMount } from "@/hooks/use-auto-refresh";
 import { useFavorites } from "@/hooks/use-favorites";
 import { cn } from "@/utils/wait-time";
 import type { ParkRecommendations } from "@/types";
 
+const IntelligenceTeaser = dynamic(
+  () =>
+    import("./intelligence/IntelligenceTeaser").then((m) => m.IntelligenceTeaser),
+  {
+    loading: () => (
+      <section className="mx-auto mt-8 max-w-5xl px-4 sm:px-6">
+        <div className="skeleton h-48 rounded-2xl" />
+      </section>
+    ),
+  }
+);
+
 interface DashboardProps {
-  initialRides: RideWithLiveData[];
+  initialRides?: RideWithLiveData[];
 }
 
 function intelligenceToInsight(intel: RideIntelligence): RideInsight {
@@ -42,50 +59,52 @@ const sortOptions: { value: SortOption; label: string; icon?: typeof Star }[] = 
   { value: "favorites", label: "Favorites", icon: Star },
 ];
 
-export function Dashboard({ initialRides }: DashboardProps) {
-  const [rides, setRides] = useState(initialRides);
+export function Dashboard({ initialRides = [] }: DashboardProps) {
+  const { rides, isRefreshing, refreshLive } = useLiveRides(initialRides);
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<SortOption>("highest");
-  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [manualRefreshing, setManualRefreshing] = useState(false);
   const [insights, setInsights] = useState<Record<number, RideInsight>>({});
-  const [intelligence, setIntelligence] = useState<ParkRecommendations | null>(null);
+  const [intelligence, setIntelligence] = useState<ParkRecommendations | null>(
+    null
+  );
   const [intelLoading, setIntelLoading] = useState(true);
   const debouncedSearch = useDebouncedValue(search);
   const { favorites, toggleFavorite, isFavorite } = useFavorites();
 
-  const refresh = useCallback(async () => {
-    setIsRefreshing(true);
+  const fetchIntelligence = useCallback(async () => {
     try {
-      const [liveRes, intelRes] = await Promise.all([
-        fetch("/api/live", { cache: "no-store" }),
-        fetch("/api/intelligence", { cache: "no-store" }),
-      ]);
-      if (liveRes.ok) {
-        const data = await liveRes.json();
-        if (data.rides) setRides(data.rides);
-      }
-      if (intelRes.ok) {
-        const data = await intelRes.json();
-        if (data.recommendations) {
-          setIntelligence(data.recommendations);
-          const mapped: Record<number, RideInsight> = {};
-          for (const [id, intel] of Object.entries(
-            data.recommendations.byRideId as Record<string, RideIntelligence>
-          )) {
-            mapped[Number(id)] = intelligenceToInsight(intel);
-          }
-          setInsights(mapped);
+      const res = await fetch("/api/intelligence", { cache: "no-store" });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.recommendations) {
+        setIntelligence(data.recommendations);
+        const mapped: Record<number, RideInsight> = {};
+        for (const [id, intel] of Object.entries(
+          data.recommendations.byRideId as Record<string, RideIntelligence>
+        )) {
+          mapped[Number(id)] = intelligenceToInsight(intel);
         }
+        setInsights(mapped);
       }
     } catch {
-      // keep last known data
+      // optional enrichment
     } finally {
-      setIsRefreshing(false);
       setIntelLoading(false);
     }
   }, []);
 
-  useAutoRefresh(refresh, REFRESH_INTERVAL_MS);
+  useDeferredMount(fetchIntelligence, 0);
+
+  const refresh = useCallback(async () => {
+    setManualRefreshing(true);
+    await refreshLive(false);
+    await fetchIntelligence();
+    setManualRefreshing(false);
+  }, [refreshLive, fetchIntelligence]);
+
+  const isRefreshingUi = isRefreshing || manualRefreshing;
+  const showRideSkeletons = rides.length === 0 && isRefreshing;
 
   const lastUpdated = useMemo(() => getLatestUpdateTime(rides), [rides]);
   const intel = useMemo(() => computeParkIntelligence(rides), [rides]);
@@ -154,12 +173,12 @@ export function Dashboard({ initialRides }: DashboardProps) {
               ))}
               <button
                 onClick={refresh}
-                disabled={isRefreshing}
+                disabled={isRefreshingUi}
                 className="chip shrink-0 disabled:opacity-40"
                 aria-label="Refresh"
               >
                 <RefreshCw
-                  className={cn("h-3.5 w-3.5", isRefreshing && "animate-spin")}
+                  className={cn("h-3.5 w-3.5", isRefreshingUi && "animate-spin")}
                 />
               </button>
             </div>
@@ -167,7 +186,9 @@ export function Dashboard({ initialRides }: DashboardProps) {
         </div>
 
         <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {filteredRides.length === 0 ? (
+          {showRideSkeletons ? (
+            Array.from({ length: 6 }).map((_, i) => <RideCardSkeleton key={i} />)
+          ) : filteredRides.length === 0 ? (
             <p className="col-span-full py-16 text-center text-sm text-[var(--fg-muted)]">
               {sort === "favorites"
                 ? "No favorite rides yet. Tap the star on any ride."

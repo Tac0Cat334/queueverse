@@ -1,21 +1,30 @@
 "use client";
 
 import { useCallback, useState, type ReactNode } from "react";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { ArrowLeft, RefreshCw, Brain } from "lucide-react";
-import type { RideWithLiveData, ParkRecommendations } from "@/types";
+import type { ParkRecommendations } from "@/types";
 import { RecommendationSection } from "./RecommendationSection";
-import { TouringPlanBuilder } from "./TouringPlanBuilder";
 import { MaturityBanner } from "./MaturityBanner";
 import { ConfidenceBadge } from "./ConfidenceBadge";
 import { computeParkIntelligence } from "@/lib/park-intelligence";
 import { EMPTY_DATA_MATURITY } from "@/lib/data-maturity";
 import { REFRESH_INTERVAL_MS } from "@/lib/constants";
-import { useAutoRefresh } from "@/hooks/use-auto-refresh";
+import { useAutoRefresh, useDeferredMount } from "@/hooks/use-auto-refresh";
+import { useLiveRides } from "@/hooks/use-live-rides";
 import { cn } from "@/utils/wait-time";
 
+const TouringPlanBuilder = dynamic(
+  () =>
+    import("./TouringPlanBuilder").then((m) => m.TouringPlanBuilder),
+  {
+    loading: () => <div className="skeleton h-64 rounded-2xl" />,
+  }
+);
+
 interface IntelligenceHubProps {
-  initialRides: RideWithLiveData[];
+  initialRides?: import("@/types").RideWithLiveData[];
 }
 
 const EMPTY_RECOMMENDATIONS: ParkRecommendations = {
@@ -31,8 +40,8 @@ const EMPTY_RECOMMENDATIONS: ParkRecommendations = {
   generatedAt: new Date().toISOString(),
 };
 
-export function IntelligenceHub({ initialRides }: IntelligenceHubProps) {
-  const [rides, setRides] = useState(initialRides);
+export function IntelligenceHub({ initialRides = [] }: IntelligenceHubProps) {
+  const { rides, refreshLive } = useLiveRides(initialRides);
   const [recommendations, setRecommendations] =
     useState<ParkRecommendations>(EMPTY_RECOMMENDATIONS);
   const [configured, setConfigured] = useState(true);
@@ -47,7 +56,6 @@ export function IntelligenceHub({ initialRides }: IntelligenceHubProps) {
       const res = await fetch("/api/intelligence", { cache: "no-store" });
       if (!res.ok) return;
       const data = await res.json();
-      if (data.rides) setRides(data.rides);
       if (data.recommendations) setRecommendations(data.recommendations);
       setConfigured(data.configured !== false);
     } catch {
@@ -58,7 +66,17 @@ export function IntelligenceHub({ initialRides }: IntelligenceHubProps) {
     }
   }, []);
 
-  useAutoRefresh(() => fetchIntelligence(false), REFRESH_INTERVAL_MS);
+  useDeferredMount(() => fetchIntelligence(false), 0);
+
+  useAutoRefresh(() => fetchIntelligence(false), REFRESH_INTERVAL_MS, {
+    runOnMount: false,
+  });
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await Promise.all([refreshLive(false), fetchIntelligence(true)]);
+    setRefreshing(false);
+  }, [refreshLive, fetchIntelligence]);
 
   const parkIntel = computeParkIntelligence(rides);
   const topPick = recommendations.bestRightNow[0];
@@ -92,7 +110,7 @@ export function IntelligenceHub({ initialRides }: IntelligenceHubProps) {
 
         <button
           type="button"
-          onClick={() => fetchIntelligence(true)}
+          onClick={handleRefresh}
           disabled={refreshing}
           className="chip shrink-0 disabled:opacity-40"
           aria-label="Refresh intelligence"

@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { ArrowLeft } from "lucide-react";
-import type { RideWithLiveData, WaitTimeRecord } from "@/types";
-import { DailyWaitChart, WeeklyPatternChart } from "./WaitChart";
+import type { WaitTimeRecord } from "@/types";
 import { computeRideAnalytics, computeLiveTrend } from "@/lib/analytics";
 import {
   computeRideIntelligence,
@@ -20,44 +20,41 @@ import { TrendBadge } from "./TrendBadge";
 import { OpportunityBadge } from "./intelligence/OpportunityBadge";
 import { ConfidenceBadge } from "./intelligence/ConfidenceBadge";
 import { useAutoRefresh } from "@/hooks/use-auto-refresh";
+import { useLiveRides } from "@/hooks/use-live-rides";
 import { useFavorites } from "@/hooks/use-favorites";
 import { REFRESH_INTERVAL_MS } from "@/lib/constants";
 
+const DailyWaitChart = dynamic(
+  () => import("./WaitChart").then((m) => m.DailyWaitChart),
+  { loading: () => <div className="skeleton h-72 rounded-2xl" /> }
+);
+
+const WeeklyPatternChart = dynamic(
+  () => import("./WaitChart").then((m) => m.WeeklyPatternChart),
+  { loading: () => <div className="skeleton h-64 rounded-2xl" /> }
+);
+
 interface RideDetailProps {
-  ride: RideWithLiveData;
+  rideId: number;
 }
 
-export function RideDetail({ ride: initialRide }: RideDetailProps) {
-  const [ride, setRide] = useState(initialRide);
+export function RideDetail({ rideId }: RideDetailProps) {
+  const { rides, isRefreshing, isReady, refreshLive } = useLiveRides([]);
+  const ride = rides.find((r) => r.ride_id === rideId) ?? null;
   const [todayRecords, setTodayRecords] = useState<WaitTimeRecord[]>([]);
   const [historyRecords, setHistoryRecords] = useState<WaitTimeRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [configured, setConfigured] = useState(true);
   const { isFavorite, toggleFavorite } = useFavorites();
 
-  const refreshLive = useCallback(async () => {
-    try {
-      const res = await fetch("/api/live", { cache: "no-store" });
-      if (!res.ok) return;
-
-      const data = await res.json();
-      const updated = data.rides?.find(
-        (r: RideWithLiveData) => r.ride_id === initialRide.ride_id
-      );
-      if (updated) setRide(updated);
-    } catch {
-      // keep showing last known data
-    }
-  }, [initialRide.ride_id]);
-
   const fetchHistory = useCallback(async (showLoading = false) => {
     if (showLoading) setLoading(true);
     try {
       const [todayRes, historyRes] = await Promise.all([
-        fetch(`/api/history?rideId=${ride.ride_id}&range=today`, {
+        fetch(`/api/history?rideId=${rideId}&range=today`, {
           cache: "no-store",
         }),
-        fetch(`/api/history?rideId=${ride.ride_id}&range=30d`, {
+        fetch(`/api/history?rideId=${rideId}&range=30d`, {
           cache: "no-store",
         }),
       ]);
@@ -76,19 +73,20 @@ export function RideDetail({ ride: initialRide }: RideDetailProps) {
     } finally {
       if (showLoading) setLoading(false);
     }
-  }, [ride.ride_id]);
-
-  const refreshAll = useCallback(async (showLoading = false) => {
-    await Promise.all([refreshLive(), fetchHistory(showLoading)]);
-  }, [refreshLive, fetchHistory]);
-
-  useAutoRefresh(() => refreshAll(false), REFRESH_INTERVAL_MS, {
-    runOnMount: false,
-  });
+  }, [rideId]);
 
   useEffect(() => {
-    refreshAll(true);
-  }, [refreshAll]);
+    fetchHistory(true);
+  }, [fetchHistory]);
+
+  useAutoRefresh(
+    () => {
+      void refreshLive(true);
+      void fetchHistory(false);
+    },
+    REFRESH_INTERVAL_MS,
+    { runOnMount: false }
+  );
 
   const analytics = useMemo(
     () => computeRideAnalytics(historyRecords, "30d"),
@@ -96,7 +94,7 @@ export function RideDetail({ ride: initialRide }: RideDetailProps) {
   );
 
   const intelligence = useMemo(
-    () => computeRideIntelligence(ride, historyRecords),
+    () => (ride ? computeRideIntelligence(ride, historyRecords) : null),
     [ride, historyRecords]
   );
 
@@ -109,6 +107,7 @@ export function RideDetail({ ride: initialRide }: RideDetailProps) {
   }, [historyRecords, todayRecords]);
 
   const todayChartData = useMemo(() => {
+    if (!ride) return [];
     const base = buildTodayChartData(allRecords, ride);
     const historicalOpen = historyRecords.filter((r) => r.is_open);
     const averages = buildHistoricalAverageSeries(
@@ -130,12 +129,41 @@ export function RideDetail({ ride: initialRide }: RideDetailProps) {
 
   const trend = useMemo(
     () =>
-      computeLiveTrend(
-        [...historyRecords, ...todayRecords],
-        ride.is_open ? ride.wait_time : undefined
-      ),
-    [historyRecords, todayRecords, ride.wait_time, ride.is_open]
+      ride
+        ? computeLiveTrend(
+            [...historyRecords, ...todayRecords],
+            ride.is_open ? ride.wait_time : undefined
+          )
+        : { trend: "flat" as const, label: "—", change: 0 },
+    [historyRecords, todayRecords, ride]
   );
+
+  if (!ride && (isRefreshing || !isReady)) {
+    return (
+      <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6">
+        <div className="skeleton h-8 w-24" />
+        <div className="card mt-8 p-8">
+          <div className="skeleton h-4 w-32" />
+          <div className="skeleton mt-4 h-20 w-40" />
+        </div>
+      </div>
+    );
+  }
+
+  if (!ride) {
+    return (
+      <div className="mx-auto max-w-5xl px-4 py-16 text-center sm:px-6">
+        <p className="text-sm text-[var(--fg-muted)]">Ride not found.</p>
+        <Link href="/" className="mt-4 inline-block text-sm text-[var(--fg)]">
+          Back to waits
+        </Link>
+      </div>
+    );
+  }
+
+  if (!intelligence) {
+    return null;
+  }
 
   const level = getWaitLevel(ride.wait_time, ride.is_open);
   const hasInsights = analytics.bestTimeToRide !== "Not enough data";

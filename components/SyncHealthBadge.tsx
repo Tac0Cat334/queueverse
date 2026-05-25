@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { SyncHealth } from "@/lib/sync-health";
 import { RelativeTime } from "./RelativeTime";
 import { cn } from "@/utils/wait-time";
+import { useDeferredMount } from "@/hooks/use-auto-refresh";
 
 interface SyncHealthBadgeProps {
   className?: string;
@@ -23,8 +24,9 @@ export function SyncHealthBadge({ className, compact = false }: SyncHealthBadgeP
     }
   }, []);
 
+  useDeferredMount(fetchHealth, 100);
+
   useEffect(() => {
-    fetchHealth();
     const id = setInterval(fetchHealth, 60_000);
     return () => clearInterval(id);
   }, [fetchHealth]);

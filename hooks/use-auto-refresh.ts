@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useLayoutEffect, useState, useCallback } from "react";
 import { REFRESH_INTERVAL_MS } from "@/lib/constants";
 
 export function useAutoRefresh(
@@ -10,11 +10,14 @@ export function useAutoRefresh(
 ) {
   const runOnMount = options?.runOnMount !== false;
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (runOnMount) callback();
+  }, [callback, runOnMount]);
+
+  useEffect(() => {
     const id = setInterval(callback, intervalMs);
     return () => clearInterval(id);
-  }, [callback, intervalMs, runOnMount]);
+  }, [callback, intervalMs]);
 }
 
 export function useAnimatedCounter(
@@ -63,4 +66,12 @@ export function useRefreshTrigger() {
   const [trigger, setTrigger] = useState(0);
   const refresh = useCallback(() => setTrigger((t) => t + 1), []);
   return { trigger, refresh };
+}
+
+/** Run a callback once after mount without blocking the first paint. */
+export function useDeferredMount(callback: () => void, delayMs = 0) {
+  useEffect(() => {
+    const id = setTimeout(callback, delayMs);
+    return () => clearTimeout(id);
+  }, [callback, delayMs]);
 }
