@@ -1,15 +1,9 @@
 import type { WaitTimeRecord } from "@/types";
 import { formatHourLabel, formatHourMinute } from "@/utils/wait-time";
 import { getParkParts, getParkDayOfWeek } from "@/lib/park-time";
+import { recencyWeight } from "@/lib/analytics/recency";
 
-const RECENCY_HALF_LIFE_DAYS = 10;
-
-function recencyWeight(recordTime: Date, reference: Date): number {
-  const ageDays =
-    (reference.getTime() - recordTime.getTime()) / (1000 * 60 * 60 * 24);
-  if (ageDays < 0) return 1;
-  return Math.exp(-ageDays / RECENCY_HALF_LIFE_DAYS);
-}
+export { recencyWeight };
 
 export interface TimeBucket {
   key: string;
@@ -32,7 +26,7 @@ export interface SlotAverage {
   hour: number;
   minute: number;
   /** How the average was derived */
-  source: "5min" | "10min" | "hour" | "weekday" | "recency";
+  source: "5min" | "10min" | "15min" | "hour" | "weekday" | "recency";
   /** Effective weighted sample strength */
   effectiveSamples?: number;
   weekdayAverage?: number | null;
@@ -42,6 +36,17 @@ export interface SlotAverage {
 export function getFiveMinuteBucket(date: Date | string): TimeBucket {
   const parts = getParkParts(new Date(date));
   const minute = Math.floor(parts.minute / 5) * 5;
+  return {
+    key: `${parts.hour}:${minute.toString().padStart(2, "0")}`,
+    hour: parts.hour,
+    minute,
+    label: formatHourMinute(parts.hour, minute),
+  };
+}
+
+export function getFifteenMinuteBucket(date: Date | string): TimeBucket {
+  const parts = getParkParts(new Date(date));
+  const minute = Math.floor(parts.minute / 15) * 15;
   return {
     key: `${parts.hour}:${minute.toString().padStart(2, "0")}`,
     hour: parts.hour,
@@ -94,6 +99,21 @@ export function bucketRecordsByFiveMinutes(records: WaitTimeRecord[]) {
   return buckets;
 }
 
+export function bucketRecordsByFifteenMinutes(records: WaitTimeRecord[]) {
+  const buckets = new Map<
+    string,
+    { total: number; count: number; hour: number; minute: number }
+  >();
+
+  for (const record of records) {
+    if (!record.is_open) continue;
+    const slot = getFifteenMinuteBucket(record.timestamp);
+    accumulateBucket(buckets, slot.key, slot.hour, slot.minute, record.wait_time);
+  }
+
+  return buckets;
+}
+
 export function bucketRecordsByTenMinutes(records: WaitTimeRecord[]) {
   const buckets = new Map<
     string,
@@ -135,7 +155,7 @@ function averageMatchingSlot(
   records: WaitTimeRecord[],
   hour: number,
   minute: number,
-  slotSize: 5 | 10 | 60,
+  slotSize: 5 | 10 | 15 | 60,
   weekdayFilter?: number
 ): SlotAverage | null {
   const open = records.filter((r) => r.is_open);
@@ -150,7 +170,9 @@ function averageMatchingSlot(
     const recordMinute =
       slotSize === 5
         ? Math.floor(parts.minute / 5) * 5
-        : Math.floor(parts.minute / 10) * 10;
+        : slotSize === 10
+          ? Math.floor(parts.minute / 10) * 10
+          : Math.floor(parts.minute / 15) * 15;
     return parts.hour === hour && recordMinute === minute;
   });
 
@@ -161,7 +183,13 @@ function averageMatchingSlot(
   );
 
   const source: SlotAverage["source"] =
-    slotSize === 60 ? "hour" : slotSize === 10 ? "10min" : "5min";
+    slotSize === 60
+      ? "hour"
+      : slotSize === 15
+        ? "15min"
+        : slotSize === 10
+          ? "10min"
+          : "5min";
 
   return {
     average,
@@ -180,7 +208,7 @@ function recencyWeightedSlotAverage(
   records: WaitTimeRecord[],
   hour: number,
   minute: number,
-  slotSize: 5 | 10 | 60,
+  slotSize: 5 | 10 | 15 | 60,
   reference: Date,
   weekdayFilter?: number
 ): SlotAverage | null {
@@ -203,7 +231,9 @@ function recencyWeightedSlotAverage(
       const recordMinute =
         slotSize === 5
           ? Math.floor(parts.minute / 5) * 5
-          : Math.floor(parts.minute / 10) * 10;
+          : slotSize === 10
+            ? Math.floor(parts.minute / 10) * 10
+            : Math.floor(parts.minute / 15) * 15;
       matches = parts.hour === hour && recordMinute === minute;
     }
     if (!matches) continue;
@@ -306,6 +336,14 @@ export function getHistoricalAverageForSlot(
   );
   if (fiveMin && fiveMin.sampleCount >= minSamples) return fiveMin;
 
+  const fifteenMin = averageMatchingSlot(
+    records,
+    slot.hour,
+    Math.floor(slot.minute / 15) * 15,
+    15
+  );
+  if (fifteenMin && fifteenMin.sampleCount >= minSamples) return fifteenMin;
+
   const tenMin = averageMatchingSlot(
     records,
     slot.hour,
@@ -317,7 +355,7 @@ export function getHistoricalAverageForSlot(
   const hourAvg = averageMatchingSlot(records, slot.hour, 0, 60);
   if (hourAvg && hourAvg.sampleCount >= minSamples) return hourAvg;
 
-  return fiveMin ?? tenMin ?? hourAvg;
+  return fiveMin ?? fifteenMin ?? tenMin ?? hourAvg;
 }
 
 export function getHistoricalAverageForHour(

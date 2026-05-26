@@ -144,6 +144,38 @@ export function getParkDateInputValue(reference = new Date()): string {
   return `${parts.year}-${String(parts.month).padStart(2, "0")}-${String(parts.day).padStart(2, "0")}`;
 }
 
+function parkDateKeyFromParts(parts: ReturnType<typeof getParkParts>): number {
+  return parts.year * 10_000 + parts.month * 100 + parts.day;
+}
+
+/** UTC instant aligned to the current 5-minute bucket in park local time */
+export function roundToParkFiveMinutes(date: Date = new Date()): Date {
+  const parts = getParkParts(date);
+  const targetDay = parkDateKeyFromParts(parts);
+  const targetMinutes =
+    parts.hour * 60 + Math.floor(parts.minute / 5) * 5;
+
+  let low = date.getTime() - 12 * 60 * 60 * 1000;
+  let high = date.getTime() + 12 * 60 * 60 * 1000;
+
+  while (high - low > 500) {
+    const mid = Math.floor((low + high) / 2);
+    const mp = getParkParts(new Date(mid));
+    const midDay = parkDateKeyFromParts(mp);
+    const midMinutes = mp.hour * 60 + mp.minute;
+    if (
+      midDay < targetDay ||
+      (midDay === targetDay && midMinutes < targetMinutes)
+    ) {
+      low = mid;
+    } else {
+      high = mid;
+    }
+  }
+
+  return new Date(high);
+}
+
 /** Parse YYYY-MM-DD from a date input as a stable park-local calendar day. */
 export function parseVisitDateInput(isoDate: string): Date {
   if (!isoDate) return new Date();

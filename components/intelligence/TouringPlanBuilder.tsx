@@ -32,6 +32,7 @@ import {
 } from "@/lib/park-time";
 import { getVisitDayInsight } from "@/lib/weekday-analytics";
 import { cn } from "@/utils/wait-time";
+import { ReasoningList } from "./ReasoningList";
 
 interface TouringPlanBuilderProps {
   rides: RideWithLiveData[];
@@ -457,6 +458,61 @@ function PlanTimeline({
       </div>
       {plan.summary && (
         <p className="mb-4 text-xs text-[var(--fg-secondary)]">{plan.summary}</p>
+      )}
+
+      {plan.timeSaved && plan.timeSaved.minutesSaved > 0 && (
+        <div className="mb-4 rounded-xl bg-[var(--wait-low)]/10 px-3 py-2.5">
+          <p className="text-xs font-medium text-[var(--wait-low)]">
+            Estimated{" "}
+            {plan.timeSaved.minutesSaved >= 60
+              ? `${(plan.timeSaved.minutesSaved / 60).toFixed(1)} hours`
+              : `${plan.timeSaved.minutesSaved} minutes`}{" "}
+            saved vs typical waits ({plan.timeSaved.percentSaved}% less queue time)
+          </p>
+          <p className="mt-1 text-[10px] text-[var(--fg-muted)]">
+            {plan.timeSaved.confidenceLabel} · {plan.timeSaved.methodology}
+          </p>
+        </div>
+      )}
+
+      {plan.rerouteSuggestions && plan.rerouteSuggestions.length > 0 && (
+        <div className="mb-5 space-y-3">
+          <p className="label">Reroute suggestions</p>
+          {plan.rerouteSuggestions.slice(0, 4).map((suggestion) => (
+            <div
+              key={`${suggestion.type}-${suggestion.rideId}`}
+              className={cn(
+                "rounded-xl px-3 py-3",
+                suggestion.priority === "urgent" &&
+                  "bg-[var(--wait-high)]/10",
+                suggestion.priority === "opportunity" &&
+                  "bg-[var(--wait-low)]/10",
+                suggestion.priority === "warning" &&
+                  "bg-[var(--wait-medium)]/10"
+              )}
+            >
+              <p className="text-xs font-medium text-[var(--fg)]">
+                {suggestion.alternativeRideName
+                  ? `Suggested: ${suggestion.alternativeRideName}`
+                  : suggestion.rideName}
+              </p>
+              <p className="mt-1 text-xs text-[var(--fg-secondary)]">
+                {suggestion.message}
+              </p>
+              {suggestion.estimatedMinutesSaved > 0 && (
+                <p className="mt-1 text-[10px] text-[var(--fg-muted)]">
+                  Est. ~{suggestion.estimatedMinutesSaved}m saved ·{" "}
+                  {suggestion.confidenceLabel}
+                </p>
+              )}
+              <ReasoningList
+                reasoning={suggestion.reasoning}
+                compact
+                className="mt-2"
+              />
+            </div>
+          ))}
+        </div>
       )}
 
       {adjustments.length > 0 && (

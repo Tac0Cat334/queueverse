@@ -23,6 +23,10 @@ import {
   RIDE_DURATION_MIN,
 } from "./scoring";
 import {
+  estimatePlanTimeSaved,
+  generateRerouteSuggestions,
+} from "@/lib/intelligence/rerouting";
+import {
   assignHistoricalSlots,
   estimateHistoricalWait,
   findPeakLunchHourForVisit,
@@ -142,13 +146,17 @@ function generateLivePlan(
     summary += ` · ${done.size} ride${done.size === 1 ? "" : "s"} optimized for right now`;
   }
 
-  return {
-    items: scheduled,
-    preferences,
-    missedMustDo,
-    summary,
-    generatedAt: new Date().toISOString(),
-  };
+  return enrichTouringPlan(
+    {
+      items: scheduled,
+      preferences,
+      missedMustDo,
+      summary,
+      generatedAt: new Date().toISOString(),
+    },
+    rides,
+    intelligenceByRide
+  );
 }
 
 /** Full day: assign each ride its statistically best time between arrival and departure. */
@@ -336,12 +344,36 @@ function generateFullDayPlan(
     summary = `Full-day plan for ${dayLabel} · ${scheduledIds.size} of ${mustDoIds.length} rides fit — extend departure to include all.`;
   }
 
+  return enrichTouringPlan(
+    {
+      items: scheduled,
+      preferences,
+      missedMustDo,
+      summary,
+      generatedAt: new Date().toISOString(),
+    },
+    rides,
+    intelligenceByRide
+  );
+}
+
+function enrichTouringPlan(
+  plan: TouringPlan,
+  rides: RideWithLiveData[],
+  intelligenceByRide: Record<number, RideIntelligence>
+): TouringPlan {
+  if (plan.items.filter((i) => i.type === "ride").length === 0) {
+    return plan;
+  }
+
   return {
-    items: scheduled,
-    preferences,
-    missedMustDo,
-    summary,
-    generatedAt: new Date().toISOString(),
+    ...plan,
+    timeSaved: estimatePlanTimeSaved(plan, rides, intelligenceByRide),
+    rerouteSuggestions: generateRerouteSuggestions(
+      plan,
+      rides,
+      intelligenceByRide
+    ),
   };
 }
 

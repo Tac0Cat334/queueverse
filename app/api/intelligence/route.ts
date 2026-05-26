@@ -1,25 +1,13 @@
 import { NextResponse } from "next/server";
-import { subDays } from "date-fns";
-import { isSupabaseConfigured, createServiceClient } from "@/lib/supabase";
-import { fetchLiveQueueTimes, flattenRides, stampFetchTime } from "@/lib/queue-times";
-import { computeParkRecommendations } from "@/lib/ride-intelligence";
 import { EMPTY_DATA_MATURITY } from "@/lib/data-maturity";
-import { syncWaitTimeSnapshots } from "@/lib/sync-snapshot";
-import type { WaitTimeRecord } from "@/types";
+import { EMPTY_PARK_STRATEGY } from "@/lib/intelligence/strategy";
+import { loadIntelligenceContext } from "@/lib/intelligence-data";
 
 export async function GET() {
   try {
-    const fetchedAt = new Date().toISOString();
-    const liveData = await fetchLiveQueueTimes({ noStore: true });
-    const rides = stampFetchTime(flattenRides(liveData), fetchedAt);
+    const context = await loadIntelligenceContext();
 
-    if (isSupabaseConfigured() && process.env.SUPABASE_SERVICE_ROLE_KEY) {
-      syncWaitTimeSnapshots(rides).catch((err) =>
-        console.error("Background snapshot sync failed:", err)
-      );
-    }
-
-    if (!isSupabaseConfigured()) {
+    if (!context.configured) {
       return NextResponse.json({
         recommendations: {
           bestRightNow: [],
@@ -28,40 +16,26 @@ export async function GET() {
           trendingUpFast: [],
           expectedToRiseSoon: [],
           byRideId: {},
-          dataMaturity: { ...EMPTY_DATA_MATURITY, totalRides: rides.length },
+          strategy: EMPTY_PARK_STRATEGY,
+          dataMaturity: {
+            ...EMPTY_DATA_MATURITY,
+            totalRides: context.rides.length,
+          },
           weekdayPatternsByRide: {},
           parkWeekdayInsights: {},
-          generatedAt: new Date().toISOString(),
+          generatedAt: context.loadedAt,
         },
-        rides,
+        rides: context.rides,
         configured: false,
+        parkId: context.parkId,
       });
     }
 
-    const since = subDays(new Date(), 30).toISOString();
-    const supabase = createServiceClient();
-
-    const { data, error } = await supabase
-      .from("wait_times")
-      .select("*")
-      .gte("timestamp", since)
-      .order("timestamp", { ascending: true });
-
-    if (error) throw error;
-
-    const byRide = new Map<number, WaitTimeRecord[]>();
-    for (const record of data ?? []) {
-      const list = byRide.get(record.ride_id) ?? [];
-      list.push(record);
-      byRide.set(record.ride_id, list);
-    }
-
-    const recommendations = computeParkRecommendations(rides, byRide);
-
     return NextResponse.json({
-      recommendations,
-      rides,
+      recommendations: context.recommendations,
+      rides: context.rides,
       configured: true,
+      parkId: context.parkId,
     });
   } catch (error) {
     return NextResponse.json(

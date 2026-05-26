@@ -139,6 +139,37 @@ export interface RideRecommendation {
   trend: TrendInfo;
   confidenceScore: number;
   confidenceLabel: string;
+  reasoning?: RecommendationReasoning;
+}
+
+export interface RecommendationReasoning {
+  headline: string;
+  bullets: string[];
+  dataNote: string;
+  baselineSource: RideIntelligence["baselineSource"];
+}
+
+export type PredictionConfidenceLevel = "low" | "moderate" | "high";
+
+export interface WaitPredictionDetail {
+  minutesAhead: number;
+  direction: "rising" | "falling" | "stable";
+  summary: string;
+  estimatedWait: number | null;
+  estimatedRange: { low: number; high: number } | null;
+  confidenceScore: number;
+  confidenceLevel: PredictionConfidenceLevel;
+  confidenceLabel: string;
+  factors: string[];
+}
+
+export interface RideHistoricalBaselineSummary {
+  weekdayAverageAtHour: number | null;
+  weekendAverageAtHour: number | null;
+  bestTimeLabel: string | null;
+  peakTimeLabel: string | null;
+  volatilityScore: number;
+  uniqueDays: number;
 }
 
 export interface DataMaturityMetrics {
@@ -166,12 +197,22 @@ export interface RideIntelligence {
   vsAveragePercent: number | null;
   comparisonMessage: string;
   opportunityScore: number;
+  opportunityTier: OpportunityTier;
+  urgencyScore: number;
+  urgencyLabel: string;
+  urgencyReason: string;
+  estimatedMinutesSavedVsTypical: number | null;
   recommendationType: RecommendationType;
   recommendationLabel: string;
   trend: TrendInfo;
   waitDrop: { amount: number; message: string } | null;
   predictedWait30: number | null;
   predictedWait60: number | null;
+  prediction30: WaitPredictionDetail | null;
+  prediction60: WaitPredictionDetail | null;
+  reasoning: RecommendationReasoning;
+  urgencyReasoning: RecommendationReasoning;
+  baselines: RideHistoricalBaselineSummary | null;
   volatilityScore: number;
   reliabilityScore: number | null;
   downtimeFrequency: number;
@@ -187,8 +228,108 @@ export interface RideIntelligence {
   confidenceLabel: string;
   slotSampleCount: number;
   dataDays: number;
-  baselineSource: "5min" | "10min" | "hour" | "weekday" | "recency" | null;
+  baselineSource: "5min" | "10min" | "15min" | "hour" | "weekday" | "recency" | null;
   learningNote: string | null;
+}
+
+export type OpportunityTierId = "excellent" | "good" | "fair" | "poor";
+
+export interface OpportunityTier {
+  tier: OpportunityTierId;
+  label: string;
+}
+
+export type NextActionType = "ride_now" | "ride_soon" | "wait" | "monitor";
+
+export interface NextBestAction {
+  rideId: number;
+  rideName: string;
+  land: string;
+  action: NextActionType;
+  headline: string;
+  reason: string;
+  reasoning: RecommendationReasoning;
+  opportunityScore: number;
+  urgencyScore: number;
+  currentWait: number;
+  predictedWait60: number | null;
+}
+
+export type CrowdPhase =
+  | "opening"
+  | "building"
+  | "peak"
+  | "declining"
+  | "closing";
+
+export interface CrowdProgressionInsight {
+  phase: CrowdPhase;
+  label: string;
+  message: string;
+  parkAverageTrend: TrendDirection;
+  averageWait: number;
+  openRideCount: number;
+}
+
+export interface ParkStrategySnapshot {
+  parkId: string;
+  nextBestAction: NextBestAction | null;
+  topOpportunities: RideRecommendation[];
+  crowdProgression: CrowdProgressionInsight;
+  optimizationIndex: number;
+  strategistMessage: string;
+}
+
+export interface RerouteSuggestion {
+  type: "prioritize" | "defer" | "alternative" | "closure";
+  rideId: number;
+  rideName: string;
+  message: string;
+  estimatedMinutesSaved: number;
+  priority: "urgent" | "opportunity" | "warning";
+  alternativeRideId?: number;
+  alternativeRideName?: string;
+  reasoning: RecommendationReasoning;
+  confidenceScore: number;
+  confidenceLabel: string;
+}
+
+export interface TimeSavedEstimate {
+  optimizedWaitMinutes: number;
+  baselineWaitMinutes: number;
+  minutesSaved: number;
+  percentSaved: number;
+  baselineLabel: string;
+  methodology: string;
+  confidenceLabel: string;
+}
+
+export type AssistantIntent =
+  | "what_next"
+  | "ride_alternative"
+  | "wait_or_ride"
+  | "optimize_window"
+  | "least_crowded_area"
+  | "finish_before"
+  | "general";
+
+export interface AssistantQuery {
+  intent: AssistantIntent;
+  rideId?: number;
+  rideName?: string;
+  windowHours?: number;
+  /** Park-local hour (0–23) for finish_before intent */
+  deadlineHour?: number;
+  message?: string;
+}
+
+export interface AssistantResponse {
+  answer: string;
+  suggestedRideIds: number[];
+  confidence: number;
+  confidenceLabel: string;
+  supportingReasons: string[];
+  reasoning: RecommendationReasoning;
 }
 
 export interface WeekdayCrowdInsight {
@@ -213,6 +354,7 @@ export interface ParkRecommendations {
   trendingUpFast: RideRecommendation[];
   expectedToRiseSoon: RideRecommendation[];
   byRideId: Record<number, RideIntelligence>;
+  strategy: ParkStrategySnapshot;
   dataMaturity: DataMaturityMetrics;
   weekdayPatternsByRide: WeekdayPatternsByRide;
   parkWeekdayInsights: Record<number, WeekdayCrowdInsight>;
@@ -222,6 +364,7 @@ export interface ParkRecommendations {
 export interface IntelligencePayload {
   recommendations: ParkRecommendations;
   configured: boolean;
+  parkId: string;
 }
 
 export type TouringPreference = "thrill" | "family" | "mixed";
@@ -270,6 +413,8 @@ export interface TouringPlan {
   missedMustDo: number[];
   summary?: string;
   generatedAt: string;
+  timeSaved?: TimeSavedEstimate;
+  rerouteSuggestions?: RerouteSuggestion[];
 }
 
 export interface PlanAdjustment {

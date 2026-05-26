@@ -19,7 +19,7 @@ export function Hero({ lastUpdated }: HeroProps) {
         </h1>
 
         <p className="mt-3 max-w-lg text-base leading-relaxed text-[var(--fg-secondary)]">
-          {BRAND.tagline}. {BRAND.subtitle}
+          {BRAND.tagline} — {BRAND.subtitle}
         </p>
 
         <div className="mt-5 space-y-1">

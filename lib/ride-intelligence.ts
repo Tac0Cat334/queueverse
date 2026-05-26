@@ -32,6 +32,29 @@ import {
 } from "@/lib/weekday-analytics";
 import { formatHourMinute } from "@/utils/wait-time";
 import { getParkParts } from "@/lib/park-time";
+import {
+  computeOpportunityScore,
+  classifyOpportunityTier,
+  estimateMinutesSavedVsTypical,
+} from "@/lib/intelligence/opportunity";
+import type { RideAggregateProfile } from "@/lib/analytics/baselines";
+import {
+  buildOpportunityReasoning,
+  buildUrgencyReasoning,
+} from "@/lib/intelligence/reasoning";
+import {
+  predictWaitAt,
+  buildTrendForecast,
+  findPeakAndLowWindows,
+  buildWaitPredictionDetail,
+} from "@/lib/intelligence/prediction";
+import {
+  computeRideUrgency,
+  computeTrendVelocity,
+} from "@/lib/intelligence/urgency";
+import { buildParkStrategySnapshot } from "@/lib/intelligence/strategy";
+
+export { predictWaitAt, computeOpportunityScore };
 
 function computeVolatilityScore(records: WaitTimeRecord[]): number {
   const open = records.filter((r) => r.is_open);
@@ -50,32 +73,6 @@ function computeDowntimeFrequency(records: WaitTimeRecord[]): number {
   if (records.length < 6) return 0;
   const closedCount = records.filter((r) => !r.is_open).length;
   return Math.round((closedCount / records.length) * 100);
-}
-
-export function predictWaitAt(
-  records: WaitTimeRecord[],
-  currentWait: number,
-  minutesAhead: number,
-  trend: TrendInfo,
-  confidenceScore = 50
-): number {
-  const targetTime = new Date(Date.now() + minutesAhead * 60 * 1000);
-  const historical = getSmartSlotAverage(records, targetTime, 1);
-  const historicalAvg = historical?.average ?? currentWait;
-
-  const trendPer5Min = trend.change / 4;
-  const steps = minutesAhead / 5;
-  const trendEstimate = currentWait + trendPer5Min * steps;
-
-  // More historical weight as confidence grows; more trend weight short-term
-  const confidenceFactor = confidenceScore / 100;
-  const baseTrendWeight = minutesAhead <= 30 ? 0.55 : 0.35;
-  const trendWeight = baseTrendWeight * (1.1 - confidenceFactor * 0.4);
-  const prediction = Math.round(
-    trendWeight * trendEstimate + (1 - trendWeight) * historicalAvg
-  );
-
-  return Math.max(0, prediction);
 }
 
 function computeVsAveragePercent(
@@ -149,63 +146,11 @@ function recommendationLabel(type: RecommendationType): string {
   }
 }
 
-export function computeOpportunityScore(params: {
-  currentWait: number;
-  historicalAvg: number | null;
-  trend: TrendInfo;
-  volatility: number;
-  waitDrop: boolean;
-  isOpen: boolean;
-  popularityPercentile: number;
-  confidenceScore: number;
-}): number {
-  if (!params.isOpen) return 0;
-
-  let score = 40;
-
-  if (params.historicalAvg !== null && params.historicalAvg > 0) {
-    const ratio = params.currentWait / params.historicalAvg;
-    if (ratio <= 1) {
-      score += Math.min(35, Math.round((1 - ratio) * 70));
-    } else {
-      score -= Math.min(25, Math.round((ratio - 1) * 40));
-    }
-  }
-
-  if (params.waitDrop) score += 18;
-
-  if (params.currentWait <= 20) score += 12;
-  else if (params.currentWait <= 35) score += 6;
-
-  if (
-    params.trend.trend === "rising_fast" ||
-    (params.trend.trend === "up" && params.trend.change >= 8)
-  ) {
-    if (params.historicalAvg !== null && params.currentWait < params.historicalAvg) {
-      score += 12;
-    } else {
-      score -= 8;
-    }
-  }
-
-  if (params.trend.trend === "falling_fast" || params.trend.trend === "down") {
-    score += 6;
-  }
-
-  score += Math.round((1 - params.popularityPercentile) * 8);
-  score += Math.round((params.volatility / 100) * 6);
-
-  // Scale by confidence — thin data can't produce extreme scores
-  const confidenceMultiplier = 0.55 + (params.confidenceScore / 100) * 0.45;
-  score = Math.round(40 + (score - 40) * confidenceMultiplier);
-
-  return Math.max(0, Math.min(100, Math.round(score)));
-}
-
 export function computeRideIntelligence(
   ride: RideWithLiveData,
   records: WaitTimeRecord[],
-  popularityPercentile = 0.5
+  popularityPercentile = 0.5,
+  aggregateProfile?: RideAggregateProfile | null
 ): RideIntelligence {
   const openRecords = records.filter((r) => r.is_open);
   const trend = computeLiveTrend(
@@ -213,25 +158,41 @@ export function computeRideIntelligence(
     ride.is_open ? ride.wait_time : undefined
   );
   const waitDropResult = detectWaitDrop(records);
-  const slotAvg = getSmartSlotAverage(openRecords, new Date(), 1);
+  const slotAvg =
+    aggregateProfile?.currentSlot ??
+    getSmartSlotAverage(openRecords, new Date(), 2);
   const historicalAvg = slotAvg?.average ?? null;
   const vsAveragePercent = computeVsAveragePercent(
     ride.wait_time,
     historicalAvg
   );
-  const volatility = computeVolatilityScore(records);
+  const volatility =
+    aggregateProfile?.volatilityScore ?? computeVolatilityScore(records);
   const reliability = computeReliabilityScore(records);
-  const downtimeFrequency = computeDowntimeFrequency(records);
+  const downtimeFrequency =
+    aggregateProfile?.downtimePercent ?? computeDowntimeFrequency(records);
 
   const confidence = computeRideConfidence(
     records,
     slotAvg?.sampleCount ?? 0
   );
 
-  const tenMinBuckets = bucketRecordsByTenMinutes(openRecords);
-  const bestBucket = findBestTenMinuteBucket(tenMinBuckets);
-  const peakBucket = findPeakTenMinuteBucket(tenMinBuckets);
-  const hourlyPattern = bucketRecordsByHour(openRecords);
+  const hourlyPattern =
+    aggregateProfile?.hourlyPattern ?? bucketRecordsByHour(openRecords);
+  const bestBucket = aggregateProfile?.bestHour != null
+    ? {
+        hour: aggregateProfile.bestHour,
+        minute: aggregateProfile.bestMinute ?? 0,
+        average: aggregateProfile.bestTimeAverage ?? Infinity,
+      }
+    : findBestTenMinuteBucket(bucketRecordsByTenMinutes(openRecords));
+  const peakBucket = aggregateProfile?.peakHour != null
+    ? {
+        hour: aggregateProfile.peakHour,
+        minute: aggregateProfile.peakMinute ?? 0,
+        average: aggregateProfile.peakTimeAverage ?? -Infinity,
+      }
+    : findPeakTenMinuteBucket(bucketRecordsByTenMinutes(openRecords));
 
   const opportunityScore = computeOpportunityScore({
     currentWait: ride.wait_time,
@@ -242,7 +203,18 @@ export function computeRideIntelligence(
     isOpen: ride.is_open,
     popularityPercentile,
     confidenceScore: confidence.confidenceScore,
+    trendVelocity: computeTrendVelocity(trend),
   });
+
+  const opportunityTier = classifyOpportunityTier(
+    opportunityScore,
+    vsAveragePercent
+  );
+  const estimatedMinutesSavedVsTypical = estimateMinutesSavedVsTypical(
+    ride.wait_time,
+    historicalAvg,
+    ride.is_open
+  );
 
   const recommendationType = buildRecommendationType(
     vsAveragePercent,
@@ -252,47 +224,105 @@ export function computeRideIntelligence(
     confidence.confidenceLevel
   );
 
-  const predictedWait30 = ride.is_open
-    ? predictWaitAt(
+  const prediction30 = ride.is_open
+    ? buildWaitPredictionDetail({
         records,
-        ride.wait_time,
-        30,
+        currentWait: ride.wait_time,
+        minutesAhead: 30,
         trend,
-        confidence.confidenceScore
-      )
+        slotSampleCount: slotAvg?.sampleCount ?? 0,
+        dataDays: confidence.uniqueDays,
+        volatility,
+        isOpen: ride.is_open,
+      })
     : null;
-  const predictedWait60 = ride.is_open
-    ? predictWaitAt(
+  const prediction60 = ride.is_open
+    ? buildWaitPredictionDetail({
         records,
-        ride.wait_time,
-        60,
+        currentWait: ride.wait_time,
+        minutesAhead: 60,
         trend,
-        confidence.confidenceScore
-      )
+        slotSampleCount: slotAvg?.sampleCount ?? 0,
+        dataDays: confidence.uniqueDays,
+        volatility,
+        isOpen: ride.is_open,
+      })
     : null;
+
+  const predictedWait30 = prediction30?.estimatedWait ?? null;
+  const predictedWait60 = prediction60?.estimatedWait ?? null;
 
   const currentHour = getParkParts(new Date()).hour;
-  const peakHour =
-    hourlyPattern.length > 0
-      ? hourlyPattern.reduce((max, h) => (h.average > max.average ? h : max))
-      : null;
-  const lowHour =
-    hourlyPattern.length > 0
-      ? hourlyPattern.reduce((min, h) => (h.average < min.average ? h : min))
-      : null;
 
   let trendForecast = "";
-  if (predictedWait30 !== null && ride.is_open) {
-    if (predictedWait30 >= ride.wait_time + 10) {
-      trendForecast = `Expected to rise toward ${predictedWait30}m within 30 min`;
-    } else if (predictedWait30 <= ride.wait_time - 10) {
-      trendForecast = "Wait likely to keep falling";
-    } else if (lowHour && lowHour.hour > currentHour) {
-      trendForecast = `Historically lowest after ${lowHour.label}`;
-    } else if (peakHour && peakHour.hour > currentHour) {
-      trendForecast = `Peak crowds typically around ${peakHour.label}`;
-    }
+  if (ride.is_open) {
+    const windows = findPeakAndLowWindows(hourlyPattern, currentHour);
+    trendForecast = buildTrendForecast({
+      currentWait: ride.wait_time,
+      predictedWait30,
+      prediction30,
+      isOpen: ride.is_open,
+      peak: windows.peak,
+      low: windows.low,
+      upcomingLow: windows.upcomingLow,
+      currentHour,
+    });
   }
+
+  const urgency = computeRideUrgency({
+    currentWait: ride.wait_time,
+    isOpen: ride.is_open,
+    predictedWait30,
+    predictedWait60,
+    vsAveragePercent,
+    trend,
+    hourlyPattern,
+    peakTimeToRide:
+      peakBucket.average === -Infinity
+        ? null
+        : formatHourMinute(peakBucket.hour, peakBucket.minute),
+  });
+
+  const partialIntel = {
+    currentWait: ride.wait_time,
+    historicalAverage: historicalAvg,
+    vsAveragePercent,
+    trend,
+    waitDrop: waitDropResult,
+    bestTimeToRide:
+      bestBucket.average === Infinity
+        ? null
+        : formatHourMinute(bestBucket.hour, bestBucket.minute),
+    peakTimeToRide:
+      peakBucket.average === -Infinity
+        ? null
+        : formatHourMinute(peakBucket.hour, peakBucket.minute),
+    predictedWait30,
+    predictedWait60,
+    volatilityScore: volatility,
+    baselineSource: slotAvg?.source ?? null,
+    slotSampleCount: slotAvg?.sampleCount ?? 0,
+    dataDays: confidence.uniqueDays,
+    urgencyScore: urgency.score,
+    rideName: ride.name,
+  };
+
+  const reasoning = buildOpportunityReasoning(partialIntel, aggregateProfile);
+  const urgencyReasoning = buildUrgencyReasoning({
+    ...partialIntel,
+    urgencyScore: urgency.score,
+  });
+
+  const baselines = aggregateProfile
+    ? {
+        weekdayAverageAtHour: aggregateProfile.weekdayAverageAtHour,
+        weekendAverageAtHour: aggregateProfile.weekendAverageAtHour,
+        bestTimeLabel: aggregateProfile.bestTimeLabel,
+        peakTimeLabel: aggregateProfile.peakTimeLabel,
+        volatilityScore: aggregateProfile.volatilityScore,
+        uniqueDays: aggregateProfile.uniqueDays,
+      }
+    : null;
 
   const learningNote =
     confidence.confidenceLevel === "low"
@@ -317,12 +347,22 @@ export function computeRideIntelligence(
       confidence.confidenceLevel
     ),
     opportunityScore,
+    opportunityTier,
+    urgencyScore: urgency.score,
+    urgencyLabel: urgency.label,
+    urgencyReason: urgency.reason,
+    estimatedMinutesSavedVsTypical,
     recommendationType,
     recommendationLabel: recommendationLabel(recommendationType),
     trend,
     waitDrop: waitDropResult,
     predictedWait30,
     predictedWait60,
+    prediction30,
+    prediction60,
+    reasoning,
+    urgencyReasoning,
+    baselines,
     volatilityScore: volatility,
     reliabilityScore: reliability,
     downtimeFrequency,
@@ -362,12 +402,13 @@ function toRecommendation(
     currentWait: intel.currentWait,
     opportunityScore: intel.opportunityScore,
     label: intel.recommendationLabel,
-    reason: intel.comparisonMessage,
+    reason: intel.reasoning.headline,
     category,
     vsAveragePercent: intel.vsAveragePercent,
     trend: intel.trend,
     confidenceScore: intel.confidenceScore,
     confidenceLabel: intel.confidenceLabel,
+    reasoning: intel.reasoning,
   };
 }
 
@@ -381,7 +422,8 @@ function rankByOpportunity(intel: RideIntelligence[]): RideIntelligence[] {
 
 export function computeParkRecommendations(
   rides: RideWithLiveData[],
-  recordsByRide: Map<number, WaitTimeRecord[]>
+  recordsByRide: Map<number, WaitTimeRecord[]>,
+  aggregateProfiles?: Map<number, RideAggregateProfile>
 ): ParkRecommendations {
   const openRides = rides.filter((r) => r.is_open);
   const avgWaits = openRides.map((r) => r.wait_time).sort((a, b) => a - b);
@@ -402,7 +444,12 @@ export function computeParkRecommendations(
     const rank = avgWaits.indexOf(ride.wait_time);
     const popularityPercentile =
       avgWaits.length > 1 ? rank / (avgWaits.length - 1) : 0.5;
-    return computeRideIntelligence(ride, records, popularityPercentile);
+    return computeRideIntelligence(
+      ride,
+      records,
+      popularityPercentile,
+      aggregateProfiles?.get(ride.ride_id)
+    );
   });
 
   const openIntel = intelligence.filter((i) => i.isOpen);
@@ -469,6 +516,8 @@ export function computeParkRecommendations(
   const weekdayPatternsByRide = computeAllWeekdayPatterns(recordsByRide);
   const parkWeekdayInsights = computeParkWeekdayInsights(allRecords);
 
+  const strategy = buildParkStrategySnapshot(rides, byRideId, bestRightNow);
+
   return {
     bestRightNow,
     greatTimeToRide,
@@ -476,6 +525,7 @@ export function computeParkRecommendations(
     trendingUpFast,
     expectedToRiseSoon,
     byRideId,
+    strategy,
     dataMaturity,
     weekdayPatternsByRide,
     parkWeekdayInsights,

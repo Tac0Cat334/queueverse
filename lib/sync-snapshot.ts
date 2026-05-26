@@ -1,47 +1,41 @@
 import type { RideWithLiveData } from "@/types";
 import { createServiceClient } from "@/lib/supabase";
+import { roundToParkFiveMinutes } from "@/lib/park-time";
 
-export function roundToFiveMinutes(date: Date): Date {
-  const rounded = new Date(date);
-  rounded.setSeconds(0, 0);
-  rounded.setMilliseconds(0);
-  rounded.setMinutes(Math.floor(rounded.getMinutes() / 5) * 5);
-  return rounded;
-}
+export { roundToParkFiveMinutes as roundToFiveMinutes };
 
 export async function syncWaitTimeSnapshots(
   rides: RideWithLiveData[],
-  timestamp = roundToFiveMinutes(new Date())
+  timestamp = roundToParkFiveMinutes(new Date())
 ): Promise<{ saved: number }> {
   const supabase = createServiceClient();
   const ts = timestamp.toISOString();
 
-  await Promise.all(
-    rides.map((ride) =>
-      supabase.from("rides").upsert(
-        {
-          ride_id: ride.ride_id,
-          name: ride.name,
-          land: ride.land,
-        },
-        { onConflict: "ride_id" }
-      )
-    )
-  );
+  const rideRows = rides.map((ride) => ({
+    ride_id: ride.ride_id,
+    name: ride.name,
+    land: ride.land,
+  }));
 
-  await Promise.all(
-    rides.map((ride) =>
-      supabase.from("wait_times").upsert(
-        {
-          ride_id: ride.ride_id,
-          wait_time: ride.wait_time,
-          is_open: ride.is_open,
-          timestamp: ts,
-        },
-        { onConflict: "ride_id,timestamp", ignoreDuplicates: true }
-      )
-    )
-  );
+  const waitRows = rides.map((ride) => ({
+    ride_id: ride.ride_id,
+    wait_time: ride.wait_time,
+    is_open: ride.is_open,
+    timestamp: ts,
+  }));
+
+  const { error: rideError } = await supabase
+    .from("rides")
+    .upsert(rideRows, { onConflict: "ride_id" });
+
+  if (rideError) throw rideError;
+
+  const { error: waitError } = await supabase.from("wait_times").upsert(waitRows, {
+    onConflict: "ride_id,timestamp",
+    ignoreDuplicates: true,
+  });
+
+  if (waitError) throw waitError;
 
   return { saved: rides.length };
 }

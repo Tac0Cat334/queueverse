@@ -5,6 +5,7 @@ import type { RideRecommendation } from "@/types";
 import { OpportunityBadge } from "./OpportunityBadge";
 import { ConfidenceBadge } from "./ConfidenceBadge";
 import { TrendBadge } from "../TrendBadge";
+import { WhyTooltip } from "./ReasoningList";
 
 interface RecommendationCardProps {
   recommendation: RideRecommendation;
@@ -38,6 +39,11 @@ export function RecommendationCard({ recommendation, rank }: RecommendationCardP
           <p className="mt-0.5 text-[11px] text-[var(--fg-muted)]">
             {recommendation.reason}
           </p>
+          {recommendation.reasoning && (
+            <div className="mt-2">
+              <WhyTooltip reasoning={recommendation.reasoning} />
+            </div>
+          )}
         </div>
 
         <div className="shrink-0 text-right">

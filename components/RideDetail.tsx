@@ -18,7 +18,9 @@ import { RelativeTime } from "./RelativeTime";
 import { FavoriteButton } from "./FavoriteButton";
 import { TrendBadge } from "./TrendBadge";
 import { OpportunityBadge } from "./intelligence/OpportunityBadge";
+import { UrgencyBadge } from "./intelligence/UrgencyBadge";
 import { ConfidenceBadge } from "./intelligence/ConfidenceBadge";
+import { ReasoningList } from "./intelligence/ReasoningList";
 import { useAutoRefresh } from "@/hooks/use-auto-refresh";
 import { useLiveRides } from "@/hooks/use-live-rides";
 import { useFavorites } from "@/hooks/use-favorites";
@@ -212,6 +214,11 @@ export function RideDetail({ rideId }: RideDetailProps) {
                 {intelligence.isOpen && (
                   <>
                     <OpportunityBadge score={intelligence.opportunityScore} size="md" />
+                    <UrgencyBadge
+                      score={intelligence.urgencyScore}
+                      label={intelligence.urgencyLabel}
+                      size="md"
+                    />
                     <ConfidenceBadge
                       score={intelligence.confidenceScore}
                       label={intelligence.confidenceLabel}
@@ -219,6 +226,21 @@ export function RideDetail({ rideId }: RideDetailProps) {
                   </>
                 )}
               </div>
+            )}
+            {intelligence.opportunityTier && ride.is_open && (
+              <p className="mt-2 text-xs font-medium text-[var(--wait-low)]">
+                {intelligence.opportunityTier.label}
+                {intelligence.estimatedMinutesSavedVsTypical
+                  ? ` · ~${intelligence.estimatedMinutesSavedVsTypical}m saved vs typical`
+                  : ""}
+              </p>
+            )}
+            {intelligence.reasoning && ride.is_open && (
+              <ReasoningList
+                reasoning={intelligence.reasoning}
+                compact
+                className="mt-3"
+              />
             )}
             {intelligence.comparisonMessage && ride.is_open && (
               <p className="mt-2 text-xs text-[var(--fg-secondary)]">
@@ -283,25 +305,26 @@ export function RideDetail({ rideId }: RideDetailProps) {
             )}
           </p>
 
-          {(intelligence.predictedWait30 !== null ||
-            intelligence.predictedWait60 !== null) && (
-            <div className="mt-4 flex flex-wrap gap-3 text-xs text-[var(--fg-muted)]">
-              {intelligence.predictedWait30 !== null && (
-                <span>
-                  Expected in 30 min:{" "}
-                  <span className="font-medium text-[var(--fg)]">
-                    {intelligence.predictedWait30}m
+          {(intelligence.prediction30 || intelligence.prediction60) && (
+            <div className="mt-4 space-y-2">
+              {intelligence.prediction30 && (
+                <div className="text-xs text-[var(--fg-secondary)]">
+                  <span>{intelligence.prediction30.summary}</span>
+                  <span className="ml-2 text-[var(--fg-muted)]">
+                    · {intelligence.prediction30.confidenceLabel}
                   </span>
-                </span>
+                </div>
               )}
-              {intelligence.predictedWait60 !== null && (
-                <span>
-                  Expected in 1 hr:{" "}
-                  <span className="font-medium text-[var(--fg)]">
-                    {intelligence.predictedWait60}m
-                  </span>
-                </span>
-              )}
+              {intelligence.prediction60 &&
+                intelligence.prediction60.summary !==
+                  intelligence.prediction30?.summary && (
+                  <div className="text-xs text-[var(--fg-secondary)]">
+                    <span>{intelligence.prediction60.summary}</span>
+                    <span className="ml-2 text-[var(--fg-muted)]">
+                      · {intelligence.prediction60.confidenceLabel}
+                    </span>
+                  </div>
+                )}
             </div>
           )}
 

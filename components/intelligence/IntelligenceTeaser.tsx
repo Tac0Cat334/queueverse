@@ -30,15 +30,15 @@ export function IntelligenceTeaser({
         <div>
           <div className="mb-2 inline-flex items-center gap-1.5 text-[var(--fg-secondary)]">
             <Brain className="h-3.5 w-3.5" />
-            <span className="label">Ride strategy</span>
+            <span className="label">Live strategist</span>
           </div>
           <h2 className="text-lg font-semibold tracking-tight text-[var(--fg)]">
-            What to ride right now
+            {recommendations?.strategy?.nextBestAction?.headline ??
+              "What to do next"}
           </h2>
           <p className="mt-1 text-xs text-[var(--fg-muted)]">
-            {recommendations?.dataMaturity
-              ? `${recommendations.dataMaturity.maturityLabel} · ${recommendations.dataMaturity.uniqueDays} days learned`
-              : "Ranked by opportunity score using live waits and historical patterns"}
+            {recommendations?.strategy?.strategistMessage ??
+              "Opportunity scores compare live waits to historical patterns and predictions"}
           </p>
         </div>
         <Link

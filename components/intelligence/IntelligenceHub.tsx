@@ -7,9 +7,10 @@ import { ArrowLeft, RefreshCw, Brain } from "lucide-react";
 import type { ParkRecommendations } from "@/types";
 import { RecommendationSection } from "./RecommendationSection";
 import { MaturityBanner } from "./MaturityBanner";
-import { ConfidenceBadge } from "./ConfidenceBadge";
+import { NextActionPanel } from "./NextActionPanel";
 import { computeParkIntelligence } from "@/lib/park-intelligence";
 import { EMPTY_DATA_MATURITY } from "@/lib/data-maturity";
+import { EMPTY_PARK_STRATEGY } from "@/lib/intelligence/strategy";
 import { REFRESH_INTERVAL_MS } from "@/lib/constants";
 import { useAutoRefresh, useDeferredMount } from "@/hooks/use-auto-refresh";
 import { useLiveRides } from "@/hooks/use-live-rides";
@@ -34,6 +35,7 @@ const EMPTY_RECOMMENDATIONS: ParkRecommendations = {
   trendingUpFast: [],
   expectedToRiseSoon: [],
   byRideId: {},
+  strategy: EMPTY_PARK_STRATEGY,
   dataMaturity: EMPTY_DATA_MATURITY,
   weekdayPatternsByRide: {},
   parkWeekdayInsights: {},
@@ -79,7 +81,7 @@ export function IntelligenceHub({ initialRides = [] }: IntelligenceHubProps) {
   }, [refreshLive, fetchIntelligence]);
 
   const parkIntel = computeParkIntelligence(rides);
-  const topPick = recommendations.bestRightNow[0];
+  const strategy = recommendations.strategy ?? EMPTY_PARK_STRATEGY;
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6">
@@ -96,15 +98,15 @@ export function IntelligenceHub({ initialRides = [] }: IntelligenceHubProps) {
           <div className="mb-3 inline-flex items-center gap-2 rounded-full bg-[var(--surface-hover)] px-3 py-1">
             <Brain className="h-3.5 w-3.5 text-[var(--fg-secondary)]" />
             <span className="text-[11px] font-medium text-[var(--fg-secondary)]">
-              Park intelligence
+              Predictive optimization
             </span>
           </div>
           <h1 className="text-3xl font-semibold tracking-tight text-[var(--fg)] sm:text-4xl">
-            Ride strategy
+            Park strategist
           </h1>
           <p className="mt-2 max-w-xl text-sm leading-relaxed text-[var(--fg-secondary)]">
-            Recommendations learn from every 5-minute snapshot — weekday patterns,
-            recency weighting, and confidence scoring improve automatically over time.
+            Live opportunity scoring, predictive waits, and adaptive touring —
+            built to answer what you should do next, not just show current queues.
           </p>
         </div>
 
@@ -130,49 +132,17 @@ export function IntelligenceHub({ initialRides = [] }: IntelligenceHubProps) {
         <MaturityBanner maturity={recommendations.dataMaturity} className="mt-6" />
       )}
 
-      {topPick && !loading && (
-        <div className="card mt-8 p-5 sm:p-6">
-          <p className="label">Best ride right now</p>
-          <div className="mt-3 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-            <div>
-              <Link
-                href={`/rides/${topPick.rideId}`}
-                className="text-2xl font-semibold tracking-tight text-[var(--fg)] hover:underline"
-              >
-                {topPick.rideName}
-              </Link>
-              <p className="mt-1 text-sm text-[var(--fg-secondary)]">
-                {topPick.label} · {topPick.reason}
-              </p>
-              <p className="mt-1 text-xs text-[var(--fg-muted)]">{topPick.land}</p>
-            </div>
-            <div className="text-left sm:text-right">
-              <p className="metric text-4xl font-semibold text-[var(--fg)]">
-                {topPick.currentWait}
-                <span className="ml-1 text-base font-normal text-[var(--fg-muted)]">
-                  min
-                </span>
-              </p>
-              <p className="mt-1 text-xs text-[var(--fg-muted)]">
-                Opportunity {topPick.opportunityScore}/100
-              </p>
-              <ConfidenceBadge
-                score={topPick.confidenceScore}
-                label={topPick.confidenceLabel}
-                className="mt-1.5"
-              />
-            </div>
-          </div>
-        </div>
+      {!loading && (
+        <NextActionPanel strategy={strategy} className="mt-8" />
       )}
 
       <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <StatCard label="Crowd level" value={parkIntel.crowdScore.label} />
+        <StatCard label="Crowd phase" value={strategy.crowdProgression.label} />
         <StatCard label="Avg wait" value={`${parkIntel.averageWait}m`} />
         <StatCard label="Open rides" value={String(parkIntel.openRides)} />
         <StatCard
-          label="Intelligence"
-          value={recommendations.dataMaturity?.maturityLabel ?? "—"}
+          label="Optimization"
+          value={`${strategy.optimizationIndex}/100`}
         />
       </div>
 
@@ -186,7 +156,7 @@ export function IntelligenceHub({ initialRides = [] }: IntelligenceHubProps) {
         <div className="mt-10 space-y-10">
           <RecommendationSection
             title="Best opportunities"
-            subtitle="Ranked by opportunity score — current wait vs historical patterns"
+            subtitle="Opportunity scores compare live waits to historical patterns and predicted trends"
             items={recommendations.bestRightNow}
           />
 
