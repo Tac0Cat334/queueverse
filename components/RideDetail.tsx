@@ -211,6 +211,18 @@ export function RideDetail({ rideId }: RideDetailProps) {
             {ride.is_open && (
               <div className="mt-3 flex flex-wrap items-center gap-2">
                 <TrendBadge trend={trend.trend} label={trend.label} change={trend.change} />
+                {intelligence.earlyEntry.active && intelligence.earlyEntry.eligible && (
+                  <span className="inline-flex items-center rounded-full bg-[var(--wait-low)]/15 px-2 py-0.5 text-[10px] font-medium text-[var(--wait-low)]">
+                    Early Entry window
+                  </span>
+                )}
+                {intelligence.waitInflation.score >= 45 && intelligence.earlyEntry.eligible && (
+                  <span className="inline-flex items-center rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400">
+                    {intelligence.waitInflation.isHeadliner
+                      ? "Spikes after opening"
+                      : "Wait inflation risk"}
+                  </span>
+                )}
                 {intelligence.isOpen && (
                   <>
                     <OpportunityBadge score={intelligence.opportunityScore} size="md" />
@@ -226,6 +238,11 @@ export function RideDetail({ rideId }: RideDetailProps) {
                   </>
                 )}
               </div>
+            )}
+            {intelligence.waitInflation.score >= 40 && ride.is_open && (
+              <p className="mt-2 text-xs text-[var(--fg-secondary)]">
+                {intelligence.waitInflation.message}
+              </p>
             )}
             {intelligence.opportunityTier && ride.is_open && (
               <p className="mt-2 text-xs font-medium text-[var(--wait-low)]">

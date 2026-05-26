@@ -42,6 +42,11 @@ export function NextActionPanel({ strategy, className }: NextActionPanelProps) {
           <TrendingUp className="h-3 w-3" />
           {crowdProgression.label} · ~{crowdProgression.averageWait}m avg
         </span>
+        {crowdProgression.label === "Early Entry" && (
+          <span className="inline-flex items-center rounded-full bg-[var(--wait-low)]/15 px-2.5 py-1 text-[10px] font-medium text-[var(--wait-low)]">
+            Optimized for Early Entry
+          </span>
+        )}
         <span className="text-[10px] text-[var(--fg-muted)]">
           {crowdProgression.openRideCount} rides open
         </span>

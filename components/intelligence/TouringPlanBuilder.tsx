@@ -222,7 +222,15 @@ export function TouringPlanBuilder({
           </label>
           <label className="block">
             <span className="label">Options</span>
-            <div className="mt-2">
+            <div className="mt-2 space-y-2">
+              <Checkbox
+                label="Early Entry"
+                checked={prefs.earlyEntry}
+                onChange={(v) => {
+                  setPlan(null);
+                  setPrefs((p) => ({ ...p, earlyEntry: v }));
+                }}
+              />
               <Checkbox
                 label="Express pass"
                 checked={prefs.expressPass}
@@ -296,6 +304,14 @@ export function TouringPlanBuilder({
             <label className="block">
               <span className="label">Options</span>
               <div className="mt-2 space-y-2">
+                <Checkbox
+                  label="Early Entry"
+                  checked={prefs.earlyEntry}
+                  onChange={(v) => {
+                    setPlan(null);
+                    setPrefs((p) => ({ ...p, earlyEntry: v }));
+                  }}
+                />
                 <Checkbox
                   label="Express pass"
                   checked={prefs.expressPass}
@@ -458,6 +474,17 @@ function PlanTimeline({
       </div>
       {plan.summary && (
         <p className="mb-4 text-xs text-[var(--fg-secondary)]">{plan.summary}</p>
+      )}
+
+      {plan.earlyEntryOptimized && (
+        <div className="mb-4 rounded-xl border border-[var(--border)] bg-[var(--surface-hover)]/60 px-3 py-2.5">
+          <p className="text-xs font-medium text-[var(--fg)]">
+            Optimized for Early Entry
+          </p>
+          <p className="mt-1 text-[11px] text-[var(--fg-muted)]">
+            Prioritizes headliners and high-inflation rides in the first hour before general opening.
+          </p>
+        </div>
       )}
 
       {plan.timeSaved && plan.timeSaved.minutesSaved > 0 && (

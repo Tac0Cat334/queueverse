@@ -168,11 +168,20 @@ function buildScheduleReason(
   intel: RideIntelligence | undefined,
   urgencyReason: string,
   estimatedWait: number,
-  hour: number
+  hour: number,
+  earlyEntry = false
 ): string {
   if (!intel) return urgencyReason;
 
   const parts: string[] = [];
+
+  if (
+    earlyEntry &&
+    intel.earlyEntry.eligible &&
+    hour < intel.earlyEntry.generalAdmissionHour
+  ) {
+    parts.push("Optimized for Early Entry");
+  }
 
   if (intel.vsAveragePercent !== null && intel.vsAveragePercent >= 10) {
     parts.push(`${intel.vsAveragePercent}% below normal`);
@@ -198,6 +207,44 @@ function buildScheduleReason(
   return parts.slice(0, 2).join(" · ");
 }
 
+function computeEarlyEntryBoost(params: {
+  ride: RideWithLiveData;
+  intel: RideIntelligence | undefined;
+  cursorMinutes: number;
+  earlyEntryEnabled: boolean;
+}): { score: number; reason: string | null } {
+  const { intel, cursorMinutes, earlyEntryEnabled } = params;
+  if (!earlyEntryEnabled || !intel?.earlyEntry.eligible) {
+    return { score: 0, reason: null };
+  }
+
+  const hour = Math.floor(cursorMinutes / 60) % 24;
+  const ga = intel.earlyEntry.generalAdmissionHour;
+  if (hour >= ga) {
+    return { score: 0, reason: null };
+  }
+
+  let score = 0;
+  const reasons: string[] = [];
+  const inflation = intel.waitInflation.score;
+
+  score += Math.round(inflation * 0.4);
+  if (intel.waitInflation.isHeadliner) {
+    score += 20;
+    reasons.push("Headliner — prioritize before general opening rush");
+  }
+  if (inflation >= 50) {
+    reasons.push(intel.waitInflation.message);
+  } else if (intel.earlyEntryVsAveragePercent != null && intel.earlyEntryVsAveragePercent >= 10) {
+    reasons.push(`${intel.earlyEntryVsAveragePercent}% below Early Entry typical`);
+  }
+
+  return {
+    score: Math.min(35, score),
+    reason: reasons[0] ?? "Optimized for Early Entry window",
+  };
+}
+
 export function scoreRideForSchedule(params: {
   ride: RideWithLiveData;
   intel: RideIntelligence | undefined;
@@ -206,8 +253,18 @@ export function scoreRideForSchedule(params: {
   preference: TouringPreference;
   expressPass: boolean;
   planMode?: TouringPlanMode;
+  earlyEntry?: boolean;
 }): RideScheduleScore {
-  const { ride, intel, cursorMinutes, lastLand, preference, expressPass, planMode = "live" } = params;
+  const {
+    ride,
+    intel,
+    cursorMinutes,
+    lastLand,
+    preference,
+    expressPass,
+    planMode = "live",
+    earlyEntry = false,
+  } = params;
   const hour = Math.floor(cursorMinutes / 60) % 24;
 
   const urgency = computeUrgency(ride, intel, cursorMinutes);
@@ -216,6 +273,12 @@ export function scoreRideForSchedule(params: {
   const landPenalty = getLandFlowPenalty(lastLand, ride.land);
   const landScore = Math.max(0, 15 - landPenalty);
   const preferenceScore = computePreferenceScore(ride, intel, preference, cursorMinutes);
+  const earlyEntryBoost = computeEarlyEntryBoost({
+    ride,
+    intel,
+    cursorMinutes,
+    earlyEntryEnabled: earlyEntry,
+  });
 
   let estimatedWait = waitAtMinutes(intel, ride, cursorMinutes, 0);
   if (ride.is_open) {
@@ -235,7 +298,8 @@ export function scoreRideForSchedule(params: {
     Math.round(opportunityBase * (planMode === "live" ? 0.35 : 0.25)) +
     timingScore +
     landScore +
-    preferenceScore -
+    preferenceScore +
+    earlyEntryBoost.score -
     (ride.is_open ? 0 : 25);
 
   const { priority, label } = buildPriorityLabel(
@@ -257,7 +321,13 @@ export function scoreRideForSchedule(params: {
     vsAveragePercent: intel?.vsAveragePercent ?? null,
     priority,
     priorityLabel: label,
-    reason: buildScheduleReason(intel, urgency.reason, estimatedWait, hour),
+    reason: buildScheduleReason(
+      intel,
+      earlyEntryBoost.reason ?? urgency.reason,
+      estimatedWait,
+      hour,
+      earlyEntry
+    ),
   };
 }
 

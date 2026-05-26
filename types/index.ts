@@ -213,6 +213,11 @@ export interface RideIntelligence {
   reasoning: RecommendationReasoning;
   urgencyReasoning: RecommendationReasoning;
   baselines: RideHistoricalBaselineSummary | null;
+  operationalPhase: OperationalPhase;
+  waitInflation: WaitInflationMetric;
+  earlyEntry: EarlyEntryContext;
+  earlyEntryBaseline: number | null;
+  earlyEntryVsAveragePercent: number | null;
   volatilityScore: number;
   reliabilityScore: number | null;
   downtimeFrequency: number;
@@ -253,6 +258,28 @@ export interface NextBestAction {
   urgencyScore: number;
   currentWait: number;
   predictedWait60: number | null;
+}
+
+export type OperationalPhase =
+  | "early_entry"
+  | "rope_drop"
+  | "morning_peak"
+  | "midday_peak"
+  | "evening_drop";
+
+export interface WaitInflationMetric {
+  score: number;
+  peakDeltaMinutes: number;
+  predictedDelta60: number;
+  message: string;
+  isHeadliner: boolean;
+}
+
+export interface EarlyEntryContext {
+  active: boolean;
+  eligible: boolean;
+  windowLabel: string;
+  generalAdmissionHour: number;
 }
 
 export type CrowdPhase =
@@ -385,6 +412,20 @@ export interface TouringPlanPreferences {
   expressPass: boolean;
   lunchBreak: boolean;
   lunchHour?: number;
+  /** Guest has Early Entry for this visit */
+  earlyEntry: boolean;
+}
+
+export interface TouringPlan {
+  items: TouringPlanItem[];
+  preferences: TouringPlanPreferences;
+  missedMustDo: number[];
+  summary?: string;
+  generatedAt: string;
+  timeSaved?: TimeSavedEstimate;
+  rerouteSuggestions?: RerouteSuggestion[];
+  /** Plan was optimized with Early Entry strategy */
+  earlyEntryOptimized?: boolean;
 }
 
 export interface TouringPlanItem {
@@ -405,16 +446,6 @@ export interface TouringPlanItem {
   travelMinutes?: number;
   /** Full-day mode: historically ideal time label */
   idealTime?: string;
-}
-
-export interface TouringPlan {
-  items: TouringPlanItem[];
-  preferences: TouringPlanPreferences;
-  missedMustDo: number[];
-  summary?: string;
-  generatedAt: string;
-  timeSaved?: TimeSavedEstimate;
-  rerouteSuggestions?: RerouteSuggestion[];
 }
 
 export interface PlanAdjustment {

@@ -2,6 +2,8 @@ import type { RideWithLiveData, RideIntelligence } from "@/types";
 import type { HourBucket } from "@/lib/time-buckets";
 import type { WeekdayPatternsByRide, WeekdayCrowdInsight } from "@/types";
 import { formatHourMinute } from "@/utils/wait-time";
+import { isEarlyEntryEligibleRide, isHeadlinerRide } from "@/lib/analytics/operational-phases";
+import { getDefaultPark } from "@/lib/parks";
 import { getPatternForVisitDay } from "@/lib/weekday-analytics";
 
 export interface HistoricalSlot {
@@ -55,7 +57,8 @@ export function rankHistoricalHoursForRide(
   intel: RideIntelligence | undefined,
   arrivalHour: number,
   departureHour: number,
-  visitContext?: VisitDayContext
+  visitContext?: VisitDayContext,
+  earlyEntry = false
 ): HistoricalSlot[] {
   const fallbackPattern = intel?.hourlyPattern ?? [];
   const { pattern, usesWeekday, sampleDays } = visitContext?.weekdayPatternsByRide
@@ -67,7 +70,26 @@ export function rankHistoricalHoursForRide(
       )
     : { pattern: fallbackPattern, usesWeekday: false, sampleDays: 0 };
 
-  const ranked = hoursInWindow(pattern, arrivalHour, departureHour);
+  const park = getDefaultPark();
+  const gaHour = park.earlyEntry?.generalAdmissionHour ?? 10;
+
+  const ranked = hoursInWindow(pattern, arrivalHour, departureHour).sort((a, b) => {
+    let scoreA = a.average;
+    let scoreB = b.average;
+
+    if (earlyEntry && isEarlyEntryEligibleRide(ride.name, park)) {
+      const headliner = isHeadlinerRide(ride.name, park);
+      const inflation = intel?.waitInflation.score ?? 0;
+      if (a.hour >= arrivalHour && a.hour < gaHour) {
+        scoreA -= headliner ? 25 + inflation * 0.15 : 10;
+      }
+      if (b.hour >= arrivalHour && b.hour < gaHour) {
+        scoreB -= headliner ? 25 + inflation * 0.15 : 10;
+      }
+    }
+
+    return scoreA - scoreB;
+  });
   const peakAverage =
     pattern.reduce((max, h) => (h.average > max ? h.average : max), 0) ||
     intel?.hourlyPattern.reduce((max, h) => (h.average > max ? h.average : max), 0) ||
@@ -115,6 +137,8 @@ export function rankHistoricalHoursForRide(
         savings >= 10
           ? `On ${dayLabel}s, best at ${entry.label} — ~${savings}% below peak (${peakAverage}m)`
           : `On ${dayLabel}s, lowest typical wait at ${entry.label} (${entry.average}m avg)`;
+    } else if (earlyEntry && index === 0 && entry.hour < gaHour && isHeadlinerRide(ride.name, park)) {
+      reason = `Best Early Entry window — historically spikes after ${gaHour}:00 opening`;
     } else if (index === 0 && savings >= 10) {
       reason = `Best time of day — ~${savings}% lower than peak (${peakAverage}m)`;
     } else if (index === 0) {
@@ -145,7 +169,8 @@ export function assignHistoricalSlots(
   intelligenceByRide: Record<number, RideIntelligence>,
   arrivalHour: number,
   departureHour: number,
-  visitContext?: VisitDayContext
+  visitContext?: VisitDayContext,
+  earlyEntry = false
 ): HistoricalSlot[] {
   const candidates = rides.map((ride) => ({
     ride,
@@ -155,7 +180,8 @@ export function assignHistoricalSlots(
       intelligenceByRide[ride.ride_id],
       arrivalHour,
       departureHour,
-      visitContext
+      visitContext,
+      earlyEntry
     ),
   }));
 

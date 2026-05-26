@@ -10,6 +10,11 @@ import type {
 import { generateRerouteSuggestions } from "../rerouting";
 import { getLandTravelMinutes } from "@/lib/touring/lands";
 import { getParkParts } from "@/lib/park-time";
+import {
+  getEarlyEntryWindow,
+  isEarlyEntryWindowHour,
+} from "@/lib/analytics/operational-phases";
+import { getDefaultPark } from "@/lib/parks";
 
 export type { AssistantQuery, AssistantResponse };
 
@@ -47,6 +52,32 @@ function buildResponse(
   };
 }
 
+function isEarlyEntryContext(
+  byRide: Record<number, RideIntelligence>,
+  plan?: TouringPlan | null
+): boolean {
+  if (plan?.earlyEntryOptimized || plan?.preferences.earlyEntry) return true;
+  const hour = getParkParts(new Date()).hour;
+  if (!isEarlyEntryWindowHour(hour, getDefaultPark())) return false;
+  return Object.values(byRide).some((i) => i.earlyEntry.active);
+}
+
+function earlyEntryPrefix(
+  byRide: Record<number, RideIntelligence>,
+  plan?: TouringPlan | null
+): string {
+  if (!isEarlyEntryContext(byRide, plan)) return "";
+  const window = getEarlyEntryWindow(getDefaultPark()).label;
+  return `Since you have Early Entry (${window}), prioritize headliners before general crowds enter. `;
+}
+
+function effectiveVsAverage(intel: RideIntelligence): number | null {
+  if (intel.earlyEntry.active && intel.earlyEntryVsAveragePercent != null) {
+    return intel.earlyEntryVsAveragePercent;
+  }
+  return intel.vsAveragePercent;
+}
+
 /** Rule-based strategist — structured for future LLM narration layer */
 export function answerAssistantQuery(
   query: AssistantQuery,
@@ -58,13 +89,13 @@ export function answerAssistantQuery(
 
   switch (query.intent) {
     case "what_next":
-      return answerWhatNext(strategy, byRide);
+      return answerWhatNext(strategy, byRide, plan);
     case "ride_alternative":
       return answerAlternative(query, rides, byRide, plan);
     case "wait_or_ride":
-      return answerWaitOrRide(query, byRide);
+      return answerWaitOrRide(query, byRide, plan);
     case "optimize_window":
-      return answerOptimizeWindow(query, rides, byRide);
+      return answerOptimizeWindow(query, rides, byRide, plan);
     case "least_crowded_area":
       return answerLeastCrowded(rides, byRide);
     case "finish_before":
@@ -86,7 +117,8 @@ export function answerAssistantQuery(
 
 function answerWhatNext(
   strategy: ParkRecommendations["strategy"],
-  byRide: Record<number, RideIntelligence>
+  byRide: Record<number, RideIntelligence>,
+  plan?: TouringPlan | null
 ): AssistantResponse {
   const next = strategy?.nextBestAction;
   if (!next) {
@@ -111,7 +143,7 @@ function answerWhatNext(
   ].filter(Boolean);
 
   return buildResponse(
-    `${next.headline}. Current wait: ${next.currentWait}m.`,
+    `${earlyEntryPrefix(byRide, plan)}${next.headline}. Current wait: ${next.currentWait}m.`,
     [next.rideId],
     {
       headline: next.reasoning.headline,
@@ -207,7 +239,8 @@ function answerAlternative(
 
 function answerWaitOrRide(
   query: AssistantQuery,
-  byRide: Record<number, RideIntelligence>
+  byRide: Record<number, RideIntelligence>,
+  plan?: TouringPlan | null
 ): AssistantResponse {
   const intel = query.rideId ? byRide[query.rideId] : undefined;
   if (!intel) {
@@ -224,6 +257,28 @@ function answerWaitOrRide(
   }
 
   const rise = (intel.predictedWait60 ?? intel.currentWait) - intel.currentWait;
+  const vsAvg = effectiveVsAverage(intel);
+
+  if (
+    intel.earlyEntry.active &&
+    intel.waitInflation.isHeadliner &&
+    intel.waitInflation.score >= 40
+  ) {
+    return buildResponse(
+      `${earlyEntryPrefix(byRide, plan)}Ride ${intel.rideName} now — ${intel.waitInflation.message}.`,
+      [intel.rideId],
+      {
+        headline: "Best opening-hour opportunity",
+        bullets: [
+          ...intel.reasoning.bullets,
+          intel.waitInflation.message,
+        ].filter(Boolean),
+        dataNote: intel.reasoning.dataNote,
+        baselineSource: intel.baselineSource,
+      },
+      intel
+    );
+  }
 
   if (rise >= 15 && intel.prediction60?.confidenceLevel !== "low") {
     return buildResponse(
@@ -242,9 +297,9 @@ function answerWaitOrRide(
     );
   }
 
-  if (intel.vsAveragePercent !== null && intel.vsAveragePercent < -12) {
+  if (vsAvg !== null && vsAvg < -12) {
     return buildResponse(
-      `${intel.rideName} is ${Math.abs(intel.vsAveragePercent)}% above typical now. ${intel.bestTimeToRide ? `Historically better around ${intel.bestTimeToRide}.` : "Consider waiting for a lower window."}`,
+      `${intel.rideName} is ${Math.abs(vsAvg)}% above ${intel.earlyEntry.active ? "Early Entry" : "typical"} now. ${intel.bestTimeToRide ? `Historically better around ${intel.bestTimeToRide}.` : "Consider waiting for a lower window."}`,
       [],
       {
         headline: "Wait for a better window",
@@ -267,18 +322,28 @@ function answerWaitOrRide(
 function answerOptimizeWindow(
   query: AssistantQuery,
   rides: RideWithLiveData[],
-  byRide: Record<number, RideIntelligence>
+  byRide: Record<number, RideIntelligence>,
+  plan?: TouringPlan | null
 ): AssistantResponse {
   const hours = query.windowHours ?? 2;
+  const eeMode = isEarlyEntryContext(byRide, plan);
   const ranked = rides
     .filter((r) => r.is_open)
-    .map((r) => ({
-      ride: r,
-      intel: byRide[r.ride_id],
-      score:
-        (byRide[r.ride_id]?.opportunityScore ?? 0) * 0.55 +
-        (byRide[r.ride_id]?.urgencyScore ?? 0) * 0.45,
-    }))
+    .map((r) => {
+      const intel = byRide[r.ride_id];
+      const inflationBoost =
+        eeMode && intel?.earlyEntry.eligible
+          ? (intel.waitInflation.score ?? 0) * 0.35
+          : 0;
+      return {
+        ride: r,
+        intel,
+        score:
+          (intel?.opportunityScore ?? 0) * 0.55 +
+          (intel?.urgencyScore ?? 0) * 0.45 +
+          inflationBoost,
+      };
+    })
     .filter((r) => r.intel?.confidenceLevel !== "low")
     .sort((a, b) => b.score - a.score)
     .slice(0, 4);
@@ -304,10 +369,12 @@ function answerOptimizeWindow(
   });
 
   return buildResponse(
-    `For the next ${hours} hour${hours === 1 ? "" : "s"}, prioritize: ${ranked.map((r) => r.ride.name).join(", ")}. Sequence by land in the touring planner.`,
+    `${earlyEntryPrefix(byRide, plan)}For the next ${hours} hour${hours === 1 ? "" : "s"}, prioritize: ${ranked.map((r) => r.ride.name).join(", ")}. Sequence by land in the touring planner.`,
     ranked.map((r) => r.ride.ride_id),
     {
-      headline: `Optimized next ${hours} hour${hours === 1 ? "" : "s"}`,
+      headline: eeMode
+        ? `Optimized for Early Entry — next ${hours} hour${hours === 1 ? "" : "s"}`
+        : `Optimized next ${hours} hour${hours === 1 ? "" : "s"}`,
       bullets,
       dataNote: "Ranked by opportunity + urgency with confidence filter",
       baselineSource: null,

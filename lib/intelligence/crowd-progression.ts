@@ -3,6 +3,8 @@ import type {
   RideWithLiveData,
   TrendDirection,
 } from "@/types";
+import { getOperationalPhase } from "@/lib/analytics/operational-phases";
+import { getDefaultPark } from "@/lib/parks";
 
 export type CrowdPhase =
   | "opening"
@@ -20,21 +22,60 @@ export interface CrowdProgressionInsight {
   openRideCount: number;
 }
 
-function phaseFromHour(hour: number): CrowdPhase {
-  if (hour < 10) return "opening";
-  if (hour < 13) return "building";
-  if (hour < 16) return "peak";
-  if (hour < 19) return "declining";
-  return "closing";
-}
+function phaseFromHour(hour: number): {
+  phase: CrowdPhase;
+  label: string;
+  message: string;
+} {
+  const park = getDefaultPark();
+  const op = getOperationalPhase(hour, park);
 
-const PHASE_MESSAGES: Record<CrowdPhase, string> = {
-  opening: "Early day — headliners often have their best windows now",
-  building: "Crowds building — prioritize high-opportunity rides before spikes",
-  peak: "Peak hours — use intelligence to find pockets of lower waits",
-  declining: "Afternoon/evening — waits often ease on select rides",
-  closing: "Late day — shorter waits possible on remaining open rides",
-};
+  switch (op.phase) {
+    case "early_entry":
+      return {
+        phase: "opening",
+        label: op.label,
+        message:
+          "Early Entry window — prioritize headliners before general admission crowds",
+      };
+    case "rope_drop":
+      return {
+        phase: "building",
+        label: op.label,
+        message: op.message,
+      };
+    case "morning_peak":
+      return {
+        phase: "building",
+        label: op.label,
+        message: op.message,
+      };
+    case "midday_peak":
+      return {
+        phase: "peak",
+        label: op.label,
+        message: op.message,
+      };
+    case "evening_drop":
+      return hour >= 19
+        ? {
+            phase: "closing",
+            label: op.label,
+            message: "Late day — shorter waits possible on remaining open rides",
+          }
+        : {
+            phase: "declining",
+            label: op.label,
+            message: op.message,
+          };
+    default:
+      return {
+        phase: "building",
+        label: op.label,
+        message: op.message,
+      };
+  }
+}
 
 /** Park-wide crowd progression from live ride intelligence */
 export function analyzeCrowdProgression(
@@ -66,12 +107,12 @@ export function analyzeCrowdProgression(
   else if (falling > rising + 2) parkAverageTrend = "down";
   else if (rising > open.length * 0.4) parkAverageTrend = "rising_fast";
 
-  const phase = phaseFromHour(parkHour);
+  const phaseInfo = phaseFromHour(parkHour);
 
   return {
-    phase,
-    label: phase.charAt(0).toUpperCase() + phase.slice(1),
-    message: PHASE_MESSAGES[phase],
+    phase: phaseInfo.phase,
+    label: phaseInfo.label,
+    message: phaseInfo.message,
     parkAverageTrend,
     averageWait: avgWait,
     openRideCount: open.length,
@@ -89,7 +130,9 @@ export function computeOptimizationIndex(
 
   const strongWindows = open.filter(
     (i) =>
-      (i.vsAveragePercent ?? 0) >= 15 || i.opportunityScore >= 70
+      (i.vsAveragePercent ?? 0) >= 15 ||
+      (i.earlyEntryVsAveragePercent ?? 0) >= 10 ||
+      i.opportunityScore >= 70
   ).length;
 
   const windowBonus = (strongWindows / open.length) * 25;

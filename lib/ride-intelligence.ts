@@ -53,6 +53,15 @@ import {
   computeTrendVelocity,
 } from "@/lib/intelligence/urgency";
 import { buildParkStrategySnapshot } from "@/lib/intelligence/strategy";
+import {
+  filterEarlyEntryRecords,
+  getEarlyEntryWindow,
+  getOperationalPhase,
+  isEarlyEntryEligibleRide,
+  isEarlyEntryWindowHour,
+} from "@/lib/analytics/operational-phases";
+import { computeWaitInflation } from "@/lib/analytics/wait-inflation";
+import { getDefaultPark } from "@/lib/parks";
 
 export { predictWaitAt, computeOpportunityScore };
 
@@ -194,6 +203,76 @@ export function computeRideIntelligence(
       }
     : findPeakTenMinuteBucket(bucketRecordsByTenMinutes(openRecords));
 
+  const park = getDefaultPark();
+  const currentHour = getParkParts(new Date()).hour;
+  const operationalPhase = getOperationalPhase(currentHour, park).phase;
+  const inEarlyEntryWindow = isEarlyEntryWindowHour(currentHour, park);
+  const earlyEntryEligible = isEarlyEntryEligibleRide(ride.name, park);
+  const earlyEntryBaseline =
+    aggregateProfile?.earlyEntrySlot?.average ??
+    (inEarlyEntryWindow ? historicalAvg : null);
+
+  const predictionRecords =
+    inEarlyEntryWindow && earlyEntryEligible
+      ? (() => {
+          const ee = filterEarlyEntryRecords(
+            records.filter((r) => r.is_open),
+            park
+          );
+          return ee.length >= 4 ? ee : records;
+        })()
+      : records;
+
+  const prediction30 = ride.is_open
+    ? buildWaitPredictionDetail({
+        records: predictionRecords,
+        currentWait: ride.wait_time,
+        minutesAhead: 30,
+        trend,
+        slotSampleCount: slotAvg?.sampleCount ?? 0,
+        dataDays: confidence.uniqueDays,
+        volatility,
+        isOpen: ride.is_open,
+        baselineLabel:
+          inEarlyEntryWindow && earlyEntryEligible
+            ? "Early Entry historical average"
+            : undefined,
+      })
+    : null;
+  const prediction60 = ride.is_open
+    ? buildWaitPredictionDetail({
+        records: predictionRecords,
+        currentWait: ride.wait_time,
+        minutesAhead: 60,
+        trend,
+        slotSampleCount: slotAvg?.sampleCount ?? 0,
+        dataDays: confidence.uniqueDays,
+        volatility,
+        isOpen: ride.is_open,
+        baselineLabel:
+          inEarlyEntryWindow && earlyEntryEligible
+            ? "Early Entry historical average"
+            : undefined,
+      })
+    : null;
+
+  const predictedWait30 = prediction30?.estimatedWait ?? null;
+  const predictedWait60 = prediction60?.estimatedWait ?? null;
+
+  const earlyEntryVsAveragePercent = computeVsAveragePercent(
+    ride.wait_time,
+    inEarlyEntryWindow && earlyEntryEligible ? earlyEntryBaseline : null
+  );
+
+  const waitInflation = computeWaitInflation(ride.name, {
+    currentWait: ride.wait_time,
+    peakTimeAverage:
+      peakBucket.average === -Infinity ? null : peakBucket.average,
+    predictedWait60,
+    hourlyPattern,
+    trend,
+  });
+
   const opportunityScore = computeOpportunityScore({
     currentWait: ride.wait_time,
     historicalAvg,
@@ -204,15 +283,23 @@ export function computeRideIntelligence(
     popularityPercentile,
     confidenceScore: confidence.confidenceScore,
     trendVelocity: computeTrendVelocity(trend),
+    earlyEntryActive: inEarlyEntryWindow && earlyEntryEligible,
+    earlyEntryBaseline,
+    waitInflationScore: waitInflation.score,
+    isHeadliner: waitInflation.isHeadliner,
   });
 
   const opportunityTier = classifyOpportunityTier(
     opportunityScore,
-    vsAveragePercent
+    inEarlyEntryWindow && earlyEntryEligible
+      ? earlyEntryVsAveragePercent ?? vsAveragePercent
+      : vsAveragePercent
   );
   const estimatedMinutesSavedVsTypical = estimateMinutesSavedVsTypical(
     ride.wait_time,
-    historicalAvg,
+    inEarlyEntryWindow && earlyEntryEligible
+      ? earlyEntryBaseline
+      : historicalAvg,
     ride.is_open
   );
 
@@ -223,36 +310,6 @@ export function computeRideIntelligence(
     opportunityScore,
     confidence.confidenceLevel
   );
-
-  const prediction30 = ride.is_open
-    ? buildWaitPredictionDetail({
-        records,
-        currentWait: ride.wait_time,
-        minutesAhead: 30,
-        trend,
-        slotSampleCount: slotAvg?.sampleCount ?? 0,
-        dataDays: confidence.uniqueDays,
-        volatility,
-        isOpen: ride.is_open,
-      })
-    : null;
-  const prediction60 = ride.is_open
-    ? buildWaitPredictionDetail({
-        records,
-        currentWait: ride.wait_time,
-        minutesAhead: 60,
-        trend,
-        slotSampleCount: slotAvg?.sampleCount ?? 0,
-        dataDays: confidence.uniqueDays,
-        volatility,
-        isOpen: ride.is_open,
-      })
-    : null;
-
-  const predictedWait30 = prediction30?.estimatedWait ?? null;
-  const predictedWait60 = prediction60?.estimatedWait ?? null;
-
-  const currentHour = getParkParts(new Date()).hour;
 
   let trendForecast = "";
   if (ride.is_open) {
@@ -287,6 +344,15 @@ export function computeRideIntelligence(
     currentWait: ride.wait_time,
     historicalAverage: historicalAvg,
     vsAveragePercent,
+    earlyEntryVsAveragePercent,
+    earlyEntry: {
+      active: inEarlyEntryWindow && earlyEntryEligible,
+      eligible: earlyEntryEligible,
+      windowLabel: getEarlyEntryWindow(park).label,
+      generalAdmissionHour: park.earlyEntry?.generalAdmissionHour ?? 10,
+    },
+    earlyEntryBaseline,
+    waitInflation,
     trend,
     waitDrop: waitDropResult,
     bestTimeToRide:
@@ -363,6 +429,16 @@ export function computeRideIntelligence(
     reasoning,
     urgencyReasoning,
     baselines,
+    operationalPhase,
+    waitInflation,
+    earlyEntry: {
+      active: inEarlyEntryWindow && earlyEntryEligible,
+      eligible: earlyEntryEligible,
+      windowLabel: getEarlyEntryWindow(park).label,
+      generalAdmissionHour: park.earlyEntry?.generalAdmissionHour ?? 10,
+    },
+    earlyEntryBaseline,
+    earlyEntryVsAveragePercent,
     volatilityScore: volatility,
     reliabilityScore: reliability,
     downtimeFrequency,

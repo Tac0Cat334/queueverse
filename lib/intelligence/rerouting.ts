@@ -8,6 +8,26 @@ import type {
 } from "@/types";
 import { getLandTravelMinutes } from "@/lib/touring/lands";
 import { buildRerouteReasoning } from "@/lib/intelligence/reasoning";
+import { isEarlyEntryWindowHour } from "@/lib/analytics/operational-phases";
+import { getDefaultPark } from "@/lib/parks";
+import { getParkParts } from "@/lib/park-time";
+
+function isEarlyEntryContext(
+  plan: TouringPlan,
+  intelligenceByRide: Record<number, RideIntelligence>
+): boolean {
+  if (plan.earlyEntryOptimized || plan.preferences.earlyEntry) return true;
+  const hour = getParkParts(new Date()).hour;
+  if (!isEarlyEntryWindowHour(hour, getDefaultPark())) return false;
+  return Object.values(intelligenceByRide).some((i) => i.earlyEntry.active);
+}
+
+function effectiveVsAverage(intel: RideIntelligence): number {
+  if (intel.earlyEntry.active && intel.earlyEntryVsAveragePercent != null) {
+    return intel.earlyEntryVsAveragePercent;
+  }
+  return intel.vsAveragePercent ?? 0;
+}
 
 function sumRideWaits(items: TouringPlanItem[]): number {
   return items
@@ -39,13 +59,21 @@ export function estimatePlanTimeSaved(
   for (const item of rideItems) {
     const intel = item.rideId ? intelligenceByRide[item.rideId] : undefined;
     const ride = rides.find((r) => r.ride_id === item.rideId);
+    const useEarlyEntryBaseline =
+      plan.earlyEntryOptimized &&
+      intel?.earlyEntry.eligible &&
+      intel.earlyEntryBaseline != null;
     const baseline =
+      (useEarlyEntryBaseline ? intel?.earlyEntryBaseline : null) ??
       intel?.historicalAverage ??
       (intel?.confidenceLevel !== "low" ? ride?.wait_time : null) ??
       item.estimatedWait ??
       0;
 
-    if (intel?.historicalAverage !== null && intel?.historicalAverage !== undefined) {
+    if (
+      (useEarlyEntryBaseline && intel?.earlyEntryBaseline != null) ||
+      (intel?.historicalAverage !== null && intel?.historicalAverage !== undefined)
+    ) {
       ridesWithBaseline += 1;
     }
     baselineWaitMinutes += baseline;
@@ -70,7 +98,9 @@ export function estimatePlanTimeSaved(
     baselineWaitMinutes,
     minutesSaved,
     percentSaved,
-    baselineLabel: "Typical waits at each scheduled time",
+    baselineLabel: plan.earlyEntryOptimized
+      ? "Early Entry typical waits at each scheduled time"
+      : "Typical waits at each scheduled time",
     methodology:
       "Compares optimized plan waits to historical slot averages — capped to avoid inflated estimates",
     confidenceLabel: confidenceLabel(confScore),
@@ -84,6 +114,7 @@ export function generateRerouteSuggestions(
   intelligenceByRide: Record<number, RideIntelligence>
 ): RerouteSuggestion[] {
   const suggestions: RerouteSuggestion[] = [];
+  const earlyEntryMode = isEarlyEntryContext(plan, intelligenceByRide);
   const rideMap = new Map(rides.map((r) => [r.ride_id, r]));
   const scheduledIds = plan.items
     .filter((i) => i.type === "ride" && i.rideId)
@@ -145,9 +176,43 @@ export function generateRerouteSuggestions(
     }
 
     const liveVsPlan = ride.wait_time - (planItem.estimatedWait ?? 0);
-    const vsAvg = intel.vsAveragePercent ?? 0;
+    const vsAvg = effectiveVsAverage(intel);
     const spikeRisk =
       (intel.predictedWait60 ?? ride.wait_time) - ride.wait_time;
+
+    const eeHeadlinerPriority =
+      earlyEntryMode &&
+      intel.earlyEntry.eligible &&
+      intel.waitInflation.isHeadliner &&
+      intel.waitInflation.score >= 40;
+
+    if (eeHeadlinerPriority && intel.urgencyScore >= 45) {
+      const reasoning = buildRerouteReasoning({
+        triggerRideName: ride.name,
+        triggerWait: ride.wait_time,
+        planWait: planItem.estimatedWait ?? 0,
+        vsAveragePercent: vsAvg,
+        trend: intel.trend,
+        type: "opportunity",
+        earlyEntry: true,
+        waitInflationMessage: intel.waitInflation.message,
+      });
+
+      suggestions.push({
+        type: "prioritize",
+        rideId,
+        rideName: ride.name,
+        message: `Best opening-hour opportunity — ${ride.name} (${intel.waitInflation.message})`,
+        estimatedMinutesSaved:
+          intel.estimatedMinutesSavedVsTypical ??
+          Math.round(intel.waitInflation.peakDeltaMinutes * 0.4),
+        priority: "urgent",
+        reasoning,
+        confidenceScore: confScore,
+        confidenceLabel: confLabel,
+      });
+      continue;
+    }
 
     if (spikeRisk >= 20 && intel.urgencyScore >= 55) {
       const reasoning = buildRerouteReasoning({
@@ -169,27 +234,38 @@ export function generateRerouteSuggestions(
         confidenceScore: intel.prediction60?.confidenceScore ?? confScore,
         confidenceLabel: intel.prediction60?.confidenceLabel ?? confLabel,
       });
-    } else if (vsAvg >= 20 && intel.confidenceLevel !== "low") {
+    } else if (vsAvg >= (earlyEntryMode ? 8 : 20) && intel.confidenceLevel !== "low") {
       const reasoning = buildRerouteReasoning({
         triggerRideName: ride.name,
         triggerWait: ride.wait_time,
         planWait: planItem.estimatedWait ?? 0,
         vsAveragePercent: vsAvg,
         type: "opportunity",
+        earlyEntry: earlyEntryMode && intel.earlyEntry.eligible,
+        waitInflationMessage:
+          earlyEntryMode && intel.waitInflation.score >= 40
+            ? intel.waitInflation.message
+            : undefined,
       });
 
       suggestions.push({
         type: "prioritize",
         rideId,
         rideName: ride.name,
-        message: `${ride.name} is ${vsAvg}% below typical — strong window if it's next`,
+        message:
+          earlyEntryMode && intel.earlyEntry.eligible
+            ? `${ride.name} — ${vsAvg}% below Early Entry typical${intel.waitInflation.isHeadliner ? " · headliner window" : ""}`
+            : `${ride.name} is ${vsAvg}% below typical — strong window if it's next`,
         estimatedMinutesSaved: intel.estimatedMinutesSavedVsTypical ?? Math.round(vsAvg * 0.5),
         priority: "opportunity",
         reasoning,
         confidenceScore: confScore,
         confidenceLabel: confLabel,
       });
-    } else if (liveVsPlan >= 25) {
+    } else if (
+      liveVsPlan >= 25 &&
+      !(earlyEntryMode && intel.waitInflation.isHeadliner && intel.earlyEntry.eligible)
+    ) {
       const alt = findBestAlternative(
         ride,
         rides,

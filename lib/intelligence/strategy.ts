@@ -7,6 +7,7 @@ import type {
 } from "@/types";
 import { getDefaultPark } from "@/lib/parks";
 import { getParkParts } from "@/lib/park-time";
+import { isEarlyEntryWindowHour } from "@/lib/analytics/operational-phases";
 import {
   analyzeCrowdProgression,
   computeOptimizationIndex,
@@ -32,11 +33,22 @@ export const EMPTY_PARK_STRATEGY: ParkStrategySnapshot = {
 function buildNextBestAction(
   intelligence: RideIntelligence[]
 ): NextBestAction | null {
+  const park = getDefaultPark();
+  const inEarlyEntry = isEarlyEntryWindowHour(getParkParts(new Date()).hour, park);
+
   const candidates = intelligence
     .filter((i) => i.isOpen && i.confidenceLevel !== "low")
     .sort((a, b) => {
-      const scoreA = a.opportunityScore * 0.6 + a.urgencyScore * 0.4;
-      const scoreB = b.opportunityScore * 0.6 + b.urgencyScore * 0.4;
+      const eeBoostA =
+        inEarlyEntry && a.earlyEntry.eligible
+          ? a.waitInflation.score * 0.3
+          : 0;
+      const eeBoostB =
+        inEarlyEntry && b.earlyEntry.eligible
+          ? b.waitInflation.score * 0.3
+          : 0;
+      const scoreA = a.opportunityScore * 0.6 + a.urgencyScore * 0.4 + eeBoostA;
+      const scoreB = b.opportunityScore * 0.6 + b.urgencyScore * 0.4 + eeBoostB;
       return scoreB - scoreA;
     });
 

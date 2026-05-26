@@ -109,6 +109,7 @@ function generateLivePlan(
         preference: preferences.preference,
         expressPass: preferences.expressPass,
         planMode: "live",
+        earlyEntry: preferences.earlyEntry,
       });
 
       if (!bestScore || scored.totalScore > bestScore.totalScore) {
@@ -138,6 +139,9 @@ function generateLivePlan(
   const selectedCount = mustDoIds.length;
 
   let summary = `Live plan · next ${windowHours} hr${windowHours === 1 ? "" : "s"} · current waits`;
+  if (preferences.earlyEntry) {
+    summary += " · Optimized for Early Entry";
+  }
   if (done.size === 0) {
     summary = "Not enough time in window — try a longer window or fewer rides.";
   } else if (missedMustDo.length > 0) {
@@ -194,7 +198,8 @@ function generateFullDayPlan(
     intelligenceByRide,
     preferences.arrivalHour,
     preferences.departureHour,
-    visitContext
+    visitContext,
+    preferences.earlyEntry
   );
 
   const scheduled: TouringPlanItem[] = [];
@@ -337,6 +342,9 @@ function generateFullDayPlan(
   const missedMustDo = mustDoIds.filter((id) => !scheduledIds.has(id));
 
   let summary = `Full-day plan for ${dayLabel} · historical best times · ${preferences.arrivalHour}:00–${preferences.departureHour}:00`;
+  if (preferences.earlyEntry) {
+    summary += " · Early Entry strategy active";
+  }
   if (parkWeekdayInsight) {
     summary += ` · ${parkWeekdayInsight.message}`;
   }
@@ -366,8 +374,11 @@ function enrichTouringPlan(
     return plan;
   }
 
+  const earlyEntryOptimized = plan.preferences.earlyEntry;
+
   return {
     ...plan,
+    earlyEntryOptimized,
     timeSaved: estimatePlanTimeSaved(plan, rides, intelligenceByRide),
     rerouteSuggestions: generateRerouteSuggestions(
       plan,
@@ -540,4 +551,5 @@ export const DEFAULT_TOURING_PREFERENCES: TouringPlanPreferences = {
   expressPass: false,
   lunchBreak: true,
   lunchHour: 12,
+  earlyEntry: false,
 };

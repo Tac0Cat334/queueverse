@@ -19,6 +19,10 @@ export function buildOpportunityReasoning(
     | "currentWait"
     | "historicalAverage"
     | "vsAveragePercent"
+    | "earlyEntryVsAveragePercent"
+    | "earlyEntryBaseline"
+    | "earlyEntry"
+    | "waitInflation"
     | "trend"
     | "waitDrop"
     | "bestTimeToRide"
@@ -34,16 +38,19 @@ export function buildOpportunityReasoning(
 ): RecommendationReasoning {
   const bullets: string[] = [];
 
-  if (intel.vsAveragePercent !== null && intel.vsAveragePercent >= 8) {
+  const vsAvg =
+    intel.earlyEntry?.active && intel.earlyEntryVsAveragePercent != null
+      ? intel.earlyEntryVsAveragePercent
+      : intel.vsAveragePercent;
+
+  if (vsAvg !== null && vsAvg >= 8) {
+    const label = intel.earlyEntry?.active ? "Early Entry" : "typical";
     bullets.push(
-      `${intel.vsAveragePercent}% below typical for this time (${intel.historicalAverage}m average)`
+      `${vsAvg}% below ${label} for this time (${intel.earlyEntry?.active ? intel.earlyEntryBaseline : intel.historicalAverage}m average)`
     );
-  } else if (
-    intel.vsAveragePercent !== null &&
-    intel.vsAveragePercent <= -12
-  ) {
+  } else if (vsAvg !== null && vsAvg <= -12) {
     bullets.push(
-      `${Math.abs(intel.vsAveragePercent)}% above typical — not an ideal window`
+      `${Math.abs(vsAvg)}% above typical — not an ideal window`
     );
   }
 
@@ -85,6 +92,14 @@ export function buildOpportunityReasoning(
         `${dowLabel} average at this hour: ~${dowAvg}m — currently better`
       );
     }
+  }
+
+  if (intel.earlyEntry?.active && intel.waitInflation.isHeadliner) {
+    bullets.push("Best opening-hour opportunity — historically spikes after general opening");
+  } else if (intel.earlyEntry?.active && intel.waitInflation.score >= 45) {
+    bullets.push(`Strong Early Entry timing — ${intel.waitInflation.message}`);
+  } else if (intel.waitInflation.score >= 55) {
+    bullets.push(intel.waitInflation.message);
   }
 
   if (intel.volatilityScore >= 65) {
@@ -172,9 +187,19 @@ export function buildRerouteReasoning(params: {
   vsAveragePercent?: number | null;
   trend?: TrendInfo;
   type: "spike" | "closure" | "opportunity" | "defer";
+  earlyEntry?: boolean;
+  waitInflationMessage?: string;
 }): RecommendationReasoning {
   const bullets: string[] = [];
   const delta = params.triggerWait - params.planWait;
+
+  if (params.earlyEntry) {
+    bullets.push("Optimized for Early Entry — protect opening-hour windows");
+  }
+
+  if (params.waitInflationMessage) {
+    bullets.push(params.waitInflationMessage);
+  }
 
   if (params.type === "spike" && delta >= 10) {
     bullets.push(
@@ -211,7 +236,9 @@ export function buildRerouteReasoning(params: {
       : params.type === "spike"
         ? "Prioritize before the spike"
         : params.type === "opportunity"
-          ? "Strong window — ride if next"
+          ? params.earlyEntry
+            ? "Best opening-hour opportunity"
+            : "Strong window — ride if next"
           : "Consider deferring";
 
   return {

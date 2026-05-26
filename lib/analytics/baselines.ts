@@ -13,11 +13,18 @@ import {
 import { formatHourMinute } from "@/utils/wait-time";
 import { getParkDayOfWeek, getParkParts } from "@/lib/park-time";
 import { countUniqueParkDays } from "@/lib/data-maturity";
+import {
+  filterEarlyEntryRecords,
+  isEarlyEntryWindowHour,
+} from "@/lib/analytics/operational-phases";
+import { getDefaultPark } from "@/lib/parks";
 
 export interface RideHistoricalBaseline {
   rideId: number;
   /** Current time-slot baseline */
   currentSlot: SlotAverage | null;
+  /** Baseline from Early Entry hour snapshots only */
+  earlyEntrySlot: SlotAverage | null;
   /** Weekday (Mon–Fri) average at current hour */
   weekdayAverageAtHour: number | null;
   weekdaySampleCount: number;
@@ -79,7 +86,16 @@ export function buildRideHistoricalBaseline(
   reference = new Date()
 ): RideHistoricalBaseline {
   const openRecords = records.filter((r) => r.is_open);
-  const currentSlot = getSmartSlotAverage(openRecords, reference, 2);
+  const park = getDefaultPark();
+  const inEarlyEntry = isEarlyEntryWindowHour(getParkParts(reference).hour, park);
+  const eeRecords = filterEarlyEntryRecords(openRecords, park);
+  const baselineRecords = inEarlyEntry && eeRecords.length >= 4 ? eeRecords : openRecords;
+
+  const currentSlot = getSmartSlotAverage(baselineRecords, reference, 2);
+  const earlyEntrySlot =
+    eeRecords.length >= 2
+      ? getSmartSlotAverage(eeRecords, reference, 2)
+      : null;
   const hour = getParkParts(reference).hour;
   const hourlyPattern = bucketRecordsByHour(openRecords);
   const tenMin = bucketRecordsByTenMinutes(openRecords);
@@ -96,6 +112,7 @@ export function buildRideHistoricalBaseline(
   return {
     rideId,
     currentSlot,
+    earlyEntrySlot,
     weekdayAverageAtHour: weekday.average,
     weekdaySampleCount: weekday.count,
     weekendAverageAtHour: weekend.average,

@@ -46,16 +46,25 @@ export interface OpportunityScoreInput {
   popularityPercentile: number;
   confidenceScore: number;
   trendVelocity?: number;
+  earlyEntryActive?: boolean;
+  earlyEntryBaseline?: number | null;
+  waitInflationScore?: number;
+  isHeadliner?: boolean;
 }
 
 /** Dynamic 0–100 score — foundation for recommendations and rerouting */
 export function computeOpportunityScore(params: OpportunityScoreInput): number {
   if (!params.isOpen) return 0;
 
+  const baseline =
+    params.earlyEntryActive && params.earlyEntryBaseline != null
+      ? params.earlyEntryBaseline
+      : params.historicalAvg;
+
   let score = 40;
 
-  if (params.historicalAvg !== null && params.historicalAvg > 0) {
-    const ratio = params.currentWait / params.historicalAvg;
+  if (baseline !== null && baseline > 0) {
+    const ratio = params.currentWait / baseline;
     if (ratio <= 1) {
       score += Math.min(35, Math.round((1 - ratio) * 70));
     } else {
@@ -72,7 +81,7 @@ export function computeOpportunityScore(params: OpportunityScoreInput): number {
     params.trend.trend === "rising_fast" ||
     (params.trend.trend === "up" && params.trend.change >= 8)
   ) {
-    if (params.historicalAvg !== null && params.currentWait < params.historicalAvg) {
+    if (baseline !== null && params.currentWait < baseline) {
       score += 12;
     } else {
       score -= 8;
@@ -88,6 +97,16 @@ export function computeOpportunityScore(params: OpportunityScoreInput): number {
 
   if (params.trendVelocity !== undefined && params.trendVelocity < -5) {
     score += 4;
+  }
+
+  if (params.earlyEntryActive && params.waitInflationScore !== undefined) {
+    score += Math.round(params.waitInflationScore * 0.25);
+    if (params.isHeadliner && params.waitInflationScore >= 40) {
+      score += 12;
+    }
+    if (baseline !== null && params.currentWait <= baseline + 15) {
+      score += 8;
+    }
   }
 
   const confidenceMultiplier = 0.55 + (params.confidenceScore / 100) * 0.45;

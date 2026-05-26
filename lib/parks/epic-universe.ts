@@ -15,5 +15,16 @@ export const EPIC_UNIVERSE_PARK: ParkConfig = {
     "SUPER NINTENDO WORLD",
     "The Wizarding World of Harry Potter - Ministry of Magic",
   ],
+  earlyEntry: {
+    generalAdmissionHour: 10,
+    durationHours: 1,
+    excludedRidePatterns: ["Battle at the Ministry"],
+    headlinerRidePatterns: [
+      "Mario Kart",
+      "Monsters Unchained",
+      "Stardust Racers",
+      "Mine-Cart Madness",
+    ],
+  },
   enabled: true,
 };

@@ -93,6 +93,7 @@ export function buildWaitPredictionDetail(params: {
   dataDays: number;
   volatility: number;
   isOpen: boolean;
+  baselineLabel?: string;
 }): WaitPredictionDetail {
   const {
     records,
@@ -103,6 +104,7 @@ export function buildWaitPredictionDetail(params: {
     dataDays,
     volatility,
     isOpen,
+    baselineLabel,
   } = params;
 
   if (!isOpen) {
@@ -154,8 +156,9 @@ export function buildWaitPredictionDetail(params: {
   const targetTime = new Date(Date.now() + minutesAhead * 60 * 1000);
   const historical = getSmartSlotAverage(records, targetTime, 2);
   if (historical) {
+    const source = baselineLabel ?? "Historical average";
     factors.push(
-      `Historical average ~${historical.average}m at that time (${historical.sampleCount} samples)`
+      `${source} ~${historical.average}m at that time (${historical.sampleCount} samples)`
     );
   }
 
