@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState, type ReactNode } from "react";
+import { useCallback, useRef, useState, type ReactNode } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { ArrowLeft, RefreshCw, Brain } from "lucide-react";
@@ -47,12 +47,14 @@ export function IntelligenceHub({ initialRides = [] }: IntelligenceHubProps) {
   const [recommendations, setRecommendations] =
     useState<ParkRecommendations>(EMPTY_RECOMMENDATIONS);
   const [configured, setConfigured] = useState(true);
-  const [loading, setLoading] = useState(true);
+  const [hasLoaded, setHasLoaded] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const fetchInFlight = useRef(false);
 
-  const fetchIntelligence = useCallback(async (showRefresh = false) => {
-    if (showRefresh) setRefreshing(true);
-    else setLoading(true);
+  const fetchIntelligence = useCallback(async (manual = false) => {
+    if (fetchInFlight.current) return;
+    fetchInFlight.current = true;
+    if (manual) setRefreshing(true);
 
     try {
       const res = await fetch("/api/intelligence", { cache: "no-store" });
@@ -60,24 +62,27 @@ export function IntelligenceHub({ initialRides = [] }: IntelligenceHubProps) {
       const data = await res.json();
       if (data.recommendations) setRecommendations(data.recommendations);
       setConfigured(data.configured !== false);
+      setHasLoaded(true);
     } catch {
       // keep last known data
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      fetchInFlight.current = false;
+      if (manual) setRefreshing(false);
     }
   }, []);
 
-  useDeferredMount(() => fetchIntelligence(false), 0);
+  useDeferredMount(() => {
+    void fetchIntelligence(false);
+  }, 0);
 
-  useAutoRefresh(() => fetchIntelligence(false), REFRESH_INTERVAL_MS, {
+  useAutoRefresh(() => {
+    void fetchIntelligence(false);
+  }, REFRESH_INTERVAL_MS, {
     runOnMount: false,
   });
 
   const handleRefresh = useCallback(async () => {
-    setRefreshing(true);
     await Promise.all([refreshLive(false), fetchIntelligence(true)]);
-    setRefreshing(false);
   }, [refreshLive, fetchIntelligence]);
 
   const parkIntel = computeParkIntelligence(rides);
@@ -128,25 +133,35 @@ export function IntelligenceHub({ initialRides = [] }: IntelligenceHubProps) {
         </p>
       )}
 
-      {!loading && recommendations.dataMaturity && (
+      {hasLoaded && recommendations.dataMaturity && (
         <MaturityBanner maturity={recommendations.dataMaturity} className="mt-6" />
       )}
 
-      {!loading && (
+      {hasLoaded ? (
         <NextActionPanel strategy={strategy} className="mt-8" />
+      ) : (
+        <div className="skeleton mt-8 h-48 rounded-2xl" aria-hidden />
       )}
 
       <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <StatCard label="Crowd phase" value={strategy.crowdProgression.label} />
-        <StatCard label="Avg wait" value={`${parkIntel.averageWait}m`} />
-        <StatCard label="Open rides" value={String(parkIntel.openRides)} />
-        <StatCard
-          label="Optimization"
-          value={`${strategy.optimizationIndex}/100`}
-        />
+        {hasLoaded ? (
+          <>
+            <StatCard label="Crowd phase" value={strategy.crowdProgression.label} />
+            <StatCard label="Avg wait" value={`${parkIntel.averageWait}m`} />
+            <StatCard label="Open rides" value={String(parkIntel.openRides)} />
+            <StatCard
+              label="Optimization"
+              value={`${strategy.optimizationIndex}/100`}
+            />
+          </>
+        ) : (
+          Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="skeleton h-16 rounded-2xl" aria-hidden />
+          ))
+        )}
       </div>
 
-      {loading ? (
+      {!hasLoaded ? (
         <div className="mt-10 space-y-6">
           {Array.from({ length: 3 }).map((_, i) => (
             <div key={i} className="skeleton h-40 rounded-2xl" />
