@@ -1,4 +1,5 @@
 import type { ChartDataPoint, RideWithLiveData, WaitTimeRecord } from "@/types";
+import { isWithinDataCollectionWindow } from "@/lib/park-hours";
 import { formatParkTime, isWithinParkDay } from "@/lib/park-time";
 import { roundToFiveMinutes } from "@/lib/sync-snapshot";
 
@@ -9,6 +10,7 @@ function toChartPoint(record: WaitTimeRecord): ChartDataPoint {
     timestamp: record.timestamp,
     wait_time: record.is_open ? record.wait_time : null,
     is_open: record.is_open,
+    operational_status: record.is_open ? "open" : "closed",
     label: formatParkTime(record.timestamp),
   };
 }
@@ -43,7 +45,11 @@ export function buildTodayChartData(
   const now = new Date();
 
   const points = records
-    .filter((r) => isWithinParkDay(r.timestamp, now))
+    .filter(
+      (r) =>
+        isWithinParkDay(r.timestamp, now) &&
+        isWithinDataCollectionWindow(r.timestamp)
+    )
     .map(toChartPoint);
 
   let merged = mergeChartPoints(points);

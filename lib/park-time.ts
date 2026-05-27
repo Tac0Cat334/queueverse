@@ -1,11 +1,27 @@
 /** Epic Universe — Orlando, FL */
 export const PARK_TIMEZONE = "America/New_York";
 
-export const PARK_DAY_CHART = {
-  /** Typical park hours shown on the daily X-axis */
+/** Park-local hours when we collect snapshots and show chart data */
+export const DATA_COLLECTION = {
   startHour: 7,
-  endHour: 22,
+  startMinute: 30,
+  endHour: 23,
+  endMinute: 0,
 } as const;
+
+export const PARK_DAY_CHART = {
+  startHour: DATA_COLLECTION.startHour,
+  startMinute: DATA_COLLECTION.startMinute,
+  endHour: DATA_COLLECTION.endHour,
+} as const;
+
+export function getCollectionStartMinutes(): number {
+  return DATA_COLLECTION.startHour * 60 + DATA_COLLECTION.startMinute;
+}
+
+export function getCollectionEndMinutes(): number {
+  return DATA_COLLECTION.endHour * 60 + DATA_COLLECTION.endMinute;
+}
 
 export function getParkParts(date: Date) {
   const formatter = new Intl.DateTimeFormat("en-US", {
@@ -75,8 +91,8 @@ export function isWithinParkDay(timestamp: string | Date, reference = new Date()
 export function getParkDayChartWindow(reference = new Date()) {
   const dayStart = getParkStartOfDay(reference);
   const dayStartMs = dayStart.getTime();
-  const chartStartMs = dayStartMs + PARK_DAY_CHART.startHour * 60 * 60 * 1000;
-  const chartEndMs = dayStartMs + PARK_DAY_CHART.endHour * 60 * 60 * 1000;
+  const chartStartMs = dayStartMs + getCollectionStartMinutes() * 60 * 1000;
+  const chartEndMs = dayStartMs + getCollectionEndMinutes() * 60 * 1000;
   const now = reference.getTime();
   const visibleEndMs = Math.max(chartStartMs, Math.min(chartEndMs, now));
 

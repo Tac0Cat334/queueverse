@@ -13,7 +13,8 @@ import {
   ReferenceArea,
   Line,
 } from "recharts";
-import type { ChartDataPoint } from "@/types";
+import type { ChartDataPoint, RideOperationalStatus } from "@/types";
+import { getOperationalStatusLabel } from "@/lib/ride-status";
 import { useChartColors } from "./ThemeProvider";
 import {
   formatParkTime,
@@ -39,6 +40,16 @@ function averageWait(points: EnrichedPoint[]): number {
   );
 }
 
+function pointUnavailableStatus(
+  point: EnrichedPoint
+): RideOperationalStatus | null {
+  if (point.operational_status && point.operational_status !== "open") {
+    return point.operational_status;
+  }
+  if (point.is_open === false) return "closed";
+  return null;
+}
+
 function getClosedSpans(
   points: EnrichedPoint[]
 ): { start: number; end: number }[] {
@@ -46,7 +57,7 @@ function getClosedSpans(
   let spanStart: number | null = null;
 
   for (let i = 0; i < points.length; i++) {
-    const closed = points[i].is_open === false;
+    const closed = pointUnavailableStatus(points[i]) !== null;
     if (closed) {
       if (spanStart === null) spanStart = points[i].timeMs;
     } else if (spanStart !== null) {
@@ -100,7 +111,8 @@ function PremiumTooltip({
 
   const point = payload[0];
   const row = point.payload as EnrichedPoint | undefined;
-  const isClosed = row?.is_open === false;
+  const unavailable = row ? pointUnavailableStatus(row) : null;
+  const isClosed = unavailable !== null;
   const value = point.value;
   const time =
     row?.displayLabel ??
@@ -108,6 +120,9 @@ function PremiumTooltip({
   const referenceAvg = avg ?? row?.historical_avg ?? 0;
   const status =
     !isClosed && value != null ? waitStatus(value, referenceAvg) : "";
+  const closedLabel = unavailable
+    ? getOperationalStatusLabel(unavailable)
+    : "Closed";
 
   return (
     <div
@@ -124,10 +139,14 @@ function PremiumTooltip({
       {isClosed ? (
         <>
           <p className="metric mt-0.5 text-base font-semibold text-[var(--fg-muted)]">
-            Closed
+            {closedLabel}
           </p>
           <p className="mt-1 text-[10px] text-[var(--fg-secondary)]">
-            Snapshot collected · ride reported closed by source
+            {unavailable === "delayed"
+              ? "Snapshot collected · ride reported delayed"
+              : unavailable === "maintenance"
+                ? "Snapshot collected · ride likely down for maintenance"
+                : "Snapshot collected · ride reported closed by source"}
           </p>
         </>
       ) : (
@@ -253,7 +272,7 @@ export function DailyWaitChart({
   );
 
   const closedMarkers = useMemo(
-    () => chartData.filter((p) => p.is_open === false),
+    () => chartData.filter((p) => pointUnavailableStatus(p) !== null),
     [chartData]
   );
 
@@ -275,11 +294,12 @@ export function DailyWaitChart({
     return (
       <div className="card flex h-56 flex-col items-center justify-center gap-2 px-6 text-center sm:h-64">
         <p className="text-sm text-[var(--fg-muted)]">
-          Today&apos;s trend builds as data is collected every 5 minutes. Gray
-          bands mean we collected a snapshot but the ride was reported closed.
+          Today&apos;s trend builds during park hours (7:30 AM – 11:00 PM). Gray
+          bands mean a snapshot was collected while the ride was closed, delayed,
+          or down for maintenance.
         </p>
         <p className="text-xs text-[var(--fg-muted)]">
-          {parkDateLabel} · Eastern time
+          {parkDateLabel} · Eastern time · overnight excluded
         </p>
       </div>
     );
@@ -602,7 +622,7 @@ export function WeeklyPatternChart({
       <div className="mb-4">
         <p className="label">Typical day</p>
         <p className="mt-0.5 text-xs text-[var(--fg-muted)]">
-          Average wait by hour · last 30 days
+          Average wait by hour (7:30 AM – 11:00 PM) · last 30 days
         </p>
       </div>
 

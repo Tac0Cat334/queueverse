@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { RideDetail } from "@/components/RideDetail";
 import { BRAND } from "@/lib/brand";
+import { loadRideDetailInitialData } from "@/lib/ride-detail-data";
 
 interface PageProps {
   params: Promise<{ id: string }>;
@@ -21,7 +22,16 @@ export default async function RidePage({ params }: PageProps) {
 
   if (isNaN(rideId)) notFound();
 
-  return <RideDetail rideId={rideId} />;
+  const initial = await loadRideDetailInitialData(rideId);
+
+  return (
+    <RideDetail
+      rideId={rideId}
+      initialRides={initial.rides}
+      initialRecords={initial.records}
+      initialConfigured={initial.configured}
+    />
+  );
 }
 
 export const dynamic = "force-dynamic";

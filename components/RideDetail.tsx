@@ -1,10 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import Link from "next/link";
-import dynamic from "next/dynamic";
 import { ArrowLeft } from "lucide-react";
-import type { WaitTimeRecord } from "@/types";
+import type { RideWithLiveData, WaitTimeRecord } from "@/types";
 import { computeRideAnalytics, computeLiveTrend } from "@/lib/analytics";
 import {
   computeRideIntelligence,
@@ -13,7 +12,13 @@ import {
 import { buildTodayChartData } from "@/lib/daily-chart";
 import { formatParkDateLabel, isWithinParkDay } from "@/lib/park-time";
 import { SyncHealthBadge } from "./SyncHealthBadge";
-import { getWaitLevel, getWaitLevelClass, formatWaitTime, cn } from "@/utils/wait-time";
+import {
+  getWaitLevel,
+  getWaitLevelClass,
+  formatRideStatusLabel,
+  cn,
+} from "@/utils/wait-time";
+import { DailyWaitChart, WeeklyPatternChart } from "./WaitChart";
 import { RelativeTime } from "./RelativeTime";
 import { FavoriteButton } from "./FavoriteButton";
 import { TrendBadge } from "./TrendBadge";
@@ -26,65 +31,49 @@ import { useLiveRides } from "@/hooks/use-live-rides";
 import { useFavorites } from "@/hooks/use-favorites";
 import { REFRESH_INTERVAL_MS } from "@/lib/constants";
 
-const DailyWaitChart = dynamic(
-  () => import("./WaitChart").then((m) => m.DailyWaitChart),
-  { loading: () => <div className="skeleton h-72 rounded-2xl" /> }
-);
-
-const WeeklyPatternChart = dynamic(
-  () => import("./WaitChart").then((m) => m.WeeklyPatternChart),
-  { loading: () => <div className="skeleton h-64 rounded-2xl" /> }
-);
-
 interface RideDetailProps {
   rideId: number;
+  initialRides?: RideWithLiveData[];
+  initialRecords?: WaitTimeRecord[];
+  initialConfigured?: boolean;
 }
 
-export function RideDetail({ rideId }: RideDetailProps) {
-  const { rides, isRefreshing, isReady, refreshLive } = useLiveRides([]);
+export function RideDetail({
+  rideId,
+  initialRides = [],
+  initialRecords = [],
+  initialConfigured = true,
+}: RideDetailProps) {
+  const { rides, isRefreshing, isReady, refreshLive } =
+    useLiveRides(initialRides);
   const ride = rides.find((r) => r.ride_id === rideId) ?? null;
-  const [todayRecords, setTodayRecords] = useState<WaitTimeRecord[]>([]);
-  const [historyRecords, setHistoryRecords] = useState<WaitTimeRecord[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [configured, setConfigured] = useState(true);
+  const [historyRecords, setHistoryRecords] =
+    useState<WaitTimeRecord[]>(initialRecords);
+  const [historyRefreshing, setHistoryRefreshing] = useState(false);
+  const [configured, setConfigured] = useState(initialConfigured);
   const { isFavorite, toggleFavorite } = useFavorites();
 
-  const fetchHistory = useCallback(async (showLoading = false) => {
-    if (showLoading) setLoading(true);
+  const fetchHistory = useCallback(async (background = false) => {
+    if (!background) setHistoryRefreshing(true);
     try {
-      const [todayRes, historyRes] = await Promise.all([
-        fetch(`/api/history?rideId=${rideId}&range=today`, {
-          cache: "no-store",
-        }),
-        fetch(`/api/history?rideId=${rideId}&range=30d`, {
-          cache: "no-store",
-        }),
-      ]);
-
-      const todayData = await todayRes.json();
-      const historyData = await historyRes.json();
-
-      setTodayRecords(todayData.records ?? []);
-      setHistoryRecords(historyData.records ?? []);
-      setConfigured(
-        todayData.configured !== false && historyData.configured !== false
-      );
+      const res = await fetch(`/api/history?rideId=${rideId}&range=30d`);
+      if (!res.ok) return;
+      const data = await res.json();
+      setHistoryRecords(data.records ?? []);
+      setConfigured(data.configured !== false);
     } catch {
-      setTodayRecords([]);
-      setHistoryRecords([]);
+      if (!background) {
+        setHistoryRecords([]);
+      }
     } finally {
-      if (showLoading) setLoading(false);
+      if (!background) setHistoryRefreshing(false);
     }
   }, [rideId]);
-
-  useEffect(() => {
-    fetchHistory(true);
-  }, [fetchHistory]);
 
   useAutoRefresh(
     () => {
       void refreshLive(true);
-      void fetchHistory(false);
+      void fetchHistory(true);
     },
     REFRESH_INTERVAL_MS,
     { runOnMount: false }
@@ -100,13 +89,7 @@ export function RideDetail({ rideId }: RideDetailProps) {
     [ride, historyRecords]
   );
 
-  const allRecords = useMemo(() => {
-    const byKey = new Map<string, WaitTimeRecord>();
-    for (const record of [...historyRecords, ...todayRecords]) {
-      byKey.set(`${record.ride_id}-${record.timestamp}`, record);
-    }
-    return Array.from(byKey.values());
-  }, [historyRecords, todayRecords]);
+  const allRecords = historyRecords;
 
   const todayChartData = useMemo(() => {
     if (!ride) return [];
@@ -133,12 +116,14 @@ export function RideDetail({ rideId }: RideDetailProps) {
     () =>
       ride
         ? computeLiveTrend(
-            [...historyRecords, ...todayRecords],
-            ride.is_open ? ride.wait_time : undefined
+            historyRecords,
+            ride.operationalStatus === "open" ? ride.wait_time : undefined
           )
         : { trend: "flat" as const, label: "—", change: 0 },
-    [historyRecords, todayRecords, ride]
+    [historyRecords, ride]
   );
+
+  const chartsReady = initialRecords.length > 0 || !historyRefreshing;
 
   if (!ride && (isRefreshing || !isReady)) {
     return (
@@ -167,7 +152,11 @@ export function RideDetail({ rideId }: RideDetailProps) {
     return null;
   }
 
-  const level = getWaitLevel(ride.wait_time, ride.is_open);
+  const level = getWaitLevel(
+    ride.wait_time,
+    ride.is_open,
+    ride.operationalStatus
+  );
   const hasInsights = analytics.bestTimeToRide !== "Not enough data";
 
   return (
@@ -203,12 +192,12 @@ export function RideDetail({ rideId }: RideDetailProps) {
                 getWaitLevelClass(level)
               )}
             >
-              {!ride.is_open ? "—" : ride.wait_time}
+              {ride.operationalStatus !== "open" ? "—" : ride.wait_time}
             </p>
             <p className="mt-1 text-sm text-[var(--fg-muted)]">
-              {formatWaitTime(ride.wait_time, ride.is_open)}
+              {formatRideStatusLabel(ride)}
             </p>
-            {ride.is_open && (
+            {ride.operationalStatus === "open" && (
               <div className="mt-3 flex flex-wrap items-center gap-2">
                 <TrendBadge trend={trend.trend} label={trend.label} change={trend.change} />
                 {intelligence.earlyEntry.active && intelligence.earlyEntry.eligible && (
@@ -239,12 +228,13 @@ export function RideDetail({ rideId }: RideDetailProps) {
                 )}
               </div>
             )}
-            {intelligence.waitInflation.score >= 40 && ride.is_open && (
+            {intelligence.waitInflation.score >= 40 &&
+              ride.operationalStatus === "open" && (
               <p className="mt-2 text-xs text-[var(--fg-secondary)]">
                 {intelligence.waitInflation.message}
               </p>
             )}
-            {intelligence.opportunityTier && ride.is_open && (
+            {intelligence.opportunityTier && ride.operationalStatus === "open" && (
               <p className="mt-2 text-xs font-medium text-[var(--wait-low)]">
                 {intelligence.opportunityTier.label}
                 {intelligence.estimatedMinutesSavedVsTypical
@@ -252,14 +242,15 @@ export function RideDetail({ rideId }: RideDetailProps) {
                   : ""}
               </p>
             )}
-            {intelligence.reasoning && ride.is_open && (
+            {intelligence.reasoning && ride.operationalStatus === "open" && (
               <ReasoningList
                 reasoning={intelligence.reasoning}
                 compact
                 className="mt-3"
               />
             )}
-            {intelligence.comparisonMessage && ride.is_open && (
+            {intelligence.comparisonMessage &&
+              ride.operationalStatus === "open" && (
               <p className="mt-2 text-xs text-[var(--fg-secondary)]">
                 {intelligence.comparisonMessage}
               </p>
@@ -272,7 +263,9 @@ export function RideDetail({ rideId }: RideDetailProps) {
           </div>
           <div className="mb-2 text-right">
             <span className="text-sm text-[var(--fg-secondary)]">
-              {ride.is_open ? "Open" : "Closed"}
+              {ride.operationalStatus === "open"
+                ? "Open"
+                : formatRideStatusLabel(ride)}
             </span>
             <RelativeTime
               date={ride.last_updated}
@@ -390,17 +383,19 @@ export function RideDetail({ rideId }: RideDetailProps) {
         </h2>
         <div className="mb-4 flex flex-wrap items-end justify-between gap-2">
           <p className="text-xs text-[var(--fg-muted)]">
-            {formatParkDateLabel()} · Full day history · Updates every 5 min
+            {formatParkDateLabel()} · 7:30 AM – 11:00 PM · Updates every 5 min
           </p>
           <SyncHealthBadge compact className="text-right" />
         </div>
-        {loading ? (
+        {!chartsReady ? (
           <div className="skeleton h-72 rounded-2xl" />
         ) : (
           <DailyWaitChart
             data={todayChartData}
-            currentWait={ride.is_open ? ride.wait_time : undefined}
-            isOpen={ride.is_open}
+            currentWait={
+              ride.operationalStatus === "open" ? ride.wait_time : undefined
+            }
+            isOpen={ride.operationalStatus === "open"}
             snapshotCount={todaySnapshotCount}
             closedSnapshotCount={closedSnapshotCount}
             historicalAverage={intelligence.historicalAverage}
@@ -413,9 +408,9 @@ export function RideDetail({ rideId }: RideDetailProps) {
           Weekly average wait pattern
         </h2>
         <p className="mb-4 text-xs text-[var(--fg-muted)]">
-          Average wait by time of day from the last 30 days
+          Average wait by time of day (7:30 AM – 11:00 PM) · last 30 days
         </p>
-        {loading ? (
+        {!chartsReady ? (
           <div className="skeleton h-64 rounded-2xl" />
         ) : (
           <WeeklyPatternChart

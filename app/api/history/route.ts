@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getWaitTimesForRide, isSupabaseConfigured } from "@/lib/supabase";
 import { getTimeRangeStart } from "@/lib/analytics";
+import { filterRecordsToCollectionWindow } from "@/lib/park-hours";
 import { getParkEndOfDay } from "@/lib/park-time";
 import type { TimeRange } from "@/types";
 
@@ -20,8 +21,17 @@ export async function GET(request: Request) {
   try {
     const since = getTimeRangeStart(range);
     const until = range === "today" ? getParkEndOfDay() : undefined;
-    const records = await getWaitTimesForRide(Number(rideId), since, until);
-    return NextResponse.json({ records, configured: true });
+    const records = filterRecordsToCollectionWindow(
+      await getWaitTimesForRide(Number(rideId), since, until)
+    );
+    return NextResponse.json(
+      { records, configured: true },
+      {
+        headers: {
+          "Cache-Control": "public, s-maxage=60, stale-while-revalidate=120",
+        },
+      }
+    );
   } catch (error) {
     return NextResponse.json(
       { error: "Failed to fetch historical data", details: String(error) },

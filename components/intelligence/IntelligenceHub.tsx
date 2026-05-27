@@ -26,6 +26,8 @@ const TouringPlanBuilder = dynamic(
 
 interface IntelligenceHubProps {
   initialRides?: import("@/types").RideWithLiveData[];
+  initialRecommendations?: ParkRecommendations;
+  initialConfigured?: boolean;
 }
 
 const EMPTY_RECOMMENDATIONS: ParkRecommendations = {
@@ -42,12 +44,18 @@ const EMPTY_RECOMMENDATIONS: ParkRecommendations = {
   generatedAt: new Date().toISOString(),
 };
 
-export function IntelligenceHub({ initialRides = [] }: IntelligenceHubProps) {
+export function IntelligenceHub({
+  initialRides = [],
+  initialRecommendations,
+  initialConfigured = true,
+}: IntelligenceHubProps) {
   const { rides, refreshLive } = useLiveRides(initialRides);
   const [recommendations, setRecommendations] =
-    useState<ParkRecommendations>(EMPTY_RECOMMENDATIONS);
-  const [configured, setConfigured] = useState(true);
-  const [hasLoaded, setHasLoaded] = useState(false);
+    useState<ParkRecommendations>(
+      initialRecommendations ?? EMPTY_RECOMMENDATIONS
+    );
+  const [configured, setConfigured] = useState(initialConfigured);
+  const [hasLoaded, setHasLoaded] = useState(!!initialRecommendations);
   const [refreshing, setRefreshing] = useState(false);
   const fetchInFlight = useRef(false);
 
@@ -57,7 +65,7 @@ export function IntelligenceHub({ initialRides = [] }: IntelligenceHubProps) {
     if (manual) setRefreshing(true);
 
     try {
-      const res = await fetch("/api/intelligence", { cache: "no-store" });
+      const res = await fetch("/api/intelligence");
       if (!res.ok) return;
       const data = await res.json();
       if (data.recommendations) setRecommendations(data.recommendations);
@@ -73,7 +81,7 @@ export function IntelligenceHub({ initialRides = [] }: IntelligenceHubProps) {
 
   useDeferredMount(() => {
     void fetchIntelligence(false);
-  }, 0);
+  }, initialRecommendations ? 1500 : 0);
 
   useAutoRefresh(() => {
     void fetchIntelligence(false);

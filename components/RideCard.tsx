@@ -3,7 +3,11 @@
 import Link from "next/link";
 import type { RideWithLiveData } from "@/types";
 import type { RideInsight } from "@/types";
-import { getWaitLevel, getWaitLevelClass, formatWaitTime } from "@/utils/wait-time";
+import {
+  getWaitLevel,
+  getWaitLevelClass,
+  formatRideStatusLabel,
+} from "@/utils/wait-time";
 import { RelativeTime } from "./RelativeTime";
 import { TrendBadge } from "./TrendBadge";
 import { FavoriteButton } from "./FavoriteButton";
@@ -24,7 +28,11 @@ export function RideCard({
   isFavorite,
   onToggleFavorite,
 }: RideCardProps) {
-  const level = getWaitLevel(ride.wait_time, ride.is_open);
+  const level = getWaitLevel(
+    ride.wait_time,
+    ride.is_open,
+    ride.operationalStatus
+  );
 
   return (
     <Link href={`/rides/${ride.ride_id}`} className="block">
@@ -55,7 +63,7 @@ export function RideCard({
               {!ride.is_open ? "—" : ride.wait_time}
             </p>
             <p className="mt-0.5 text-[11px] text-[var(--fg-muted)]">
-              {formatWaitTime(ride.wait_time, ride.is_open)}
+              {formatRideStatusLabel(ride)}
             </p>
           </div>
         </div>
@@ -67,7 +75,9 @@ export function RideCard({
                 ride.is_open ? "bg-[var(--wait-low)]" : "bg-[var(--wait-closed)]"
               }`}
             />
-            {ride.is_open ? "Open" : "Closed"}
+            {ride.operationalStatus === "open"
+              ? "Open"
+              : formatRideStatusLabel(ride)}
           </span>
 
           <div className="flex shrink-0 flex-col items-end gap-1 text-right">

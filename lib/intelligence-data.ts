@@ -6,6 +6,7 @@ import { computeParkRecommendations } from "@/lib/ride-intelligence";
 import { buildAllRideAggregateProfiles } from "@/lib/analytics/baselines";
 import type { RideAggregateProfile } from "@/lib/analytics/baselines";
 import { cacheKey, getCached, setCached } from "@/lib/analytics/cache";
+import { filterRecordsToCollectionWindow } from "@/lib/park-hours";
 import { getDefaultPark } from "@/lib/parks";
 
 const HISTORY_DAYS = 30;
@@ -36,7 +37,7 @@ async function loadHistoricalRecords(): Promise<Map<number, WaitTimeRecord[]>> {
 
   if (error || !data) return byRide;
 
-  for (const record of data) {
+  for (const record of filterRecordsToCollectionWindow(data)) {
     const list = byRide.get(record.ride_id) ?? [];
     list.push(record);
     byRide.set(record.ride_id, list);
@@ -55,8 +56,9 @@ export async function loadIntelligenceContext(options?: {
   }
 
   const fetchedAt = new Date().toISOString();
-  const liveData = await fetchLiveQueueTimes({ noStore: true });
-  const rides = stampFetchTime(flattenRides(liveData), fetchedAt);
+  const reference = new Date(fetchedAt);
+  const liveData = await fetchLiveQueueTimes({ noStore: false });
+  const rides = stampFetchTime(flattenRides(liveData, reference), fetchedAt);
   const configured = isSupabaseConfigured();
   const recordsByRide = configured
     ? await loadHistoricalRecords()

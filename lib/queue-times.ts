@@ -1,6 +1,7 @@
 import type { QueueTimesResponse, RideWithLiveData } from "@/types";
 import { EPIC_UNIVERSE_PARK_ID, QUEUE_TIMES_BASE_URL } from "@/lib/constants";
 import { formatRideName } from "@/lib/ride-names";
+import { enrichRideWithStatus } from "@/lib/ride-status";
 
 export async function fetchLiveQueueTimes(
   options?: { noStore?: boolean }
@@ -23,19 +24,27 @@ export function isMainRide(name: string): boolean {
   return !/single rider/i.test(name);
 }
 
-export function flattenRides(data: QueueTimesResponse): RideWithLiveData[] {
+export function flattenRides(
+  data: QueueTimesResponse,
+  referenceTime = new Date()
+): RideWithLiveData[] {
   return data.lands.flatMap((land) =>
     land.rides
       .filter((ride) => isMainRide(ride.name))
-      .map((ride) => ({
-      id: String(ride.id),
-      ride_id: ride.id,
-        name: formatRideName(ride.name),
-      land: land.name,
-      is_open: ride.is_open,
-      wait_time: ride.wait_time,
-      last_updated: ride.last_updated,
-    }))
+      .map((ride) =>
+        enrichRideWithStatus(
+          {
+            id: String(ride.id),
+            ride_id: ride.id,
+            name: formatRideName(ride.name),
+            land: land.name,
+            is_open: ride.is_open,
+            wait_time: ride.wait_time,
+            last_updated: ride.last_updated,
+          },
+          referenceTime
+        )
+      )
   );
 }
 

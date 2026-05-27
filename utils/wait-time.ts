@@ -1,7 +1,13 @@
-import type { WaitLevel } from "@/types";
+import type { RideOperationalStatus, WaitLevel } from "@/types";
 import { WAIT_THRESHOLDS } from "@/lib/constants";
+import { getOperationalStatusLabel } from "@/lib/ride-status";
 
-export function getWaitLevel(waitTime: number, isOpen: boolean): WaitLevel {
+export function getWaitLevel(
+  waitTime: number,
+  isOpen: boolean,
+  operationalStatus?: RideOperationalStatus
+): WaitLevel {
+  if (operationalStatus && operationalStatus !== "open") return "closed";
   if (!isOpen) return "closed";
   if (waitTime <= WAIT_THRESHOLDS.low) return "low";
   if (waitTime <= WAIT_THRESHOLDS.medium) return "medium";
@@ -25,6 +31,17 @@ export function formatWaitTime(minutes: number, isOpen: boolean): string {
   if (!isOpen) return "Closed";
   if (minutes === 0) return "Walk-on";
   return `${minutes} min`;
+}
+
+export function formatRideStatusLabel(ride: {
+  is_open: boolean;
+  wait_time: number;
+  operationalStatus: RideOperationalStatus;
+}): string {
+  if (ride.operationalStatus !== "open") {
+    return getOperationalStatusLabel(ride.operationalStatus);
+  }
+  return formatWaitTime(ride.wait_time, true);
 }
 
 export function formatHourLabel(hour: number): string {

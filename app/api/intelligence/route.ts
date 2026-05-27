@@ -31,12 +31,19 @@ export async function GET() {
       });
     }
 
-    return NextResponse.json({
-      recommendations: context.recommendations,
-      rides: context.rides,
-      configured: true,
-      parkId: context.parkId,
-    });
+    return NextResponse.json(
+      {
+        recommendations: context.recommendations,
+        rides: context.rides,
+        configured: true,
+        parkId: context.parkId,
+      },
+      {
+        headers: {
+          "Cache-Control": "public, s-maxage=60, stale-while-revalidate=120",
+        },
+      }
+    );
   } catch (error) {
     return NextResponse.json(
       { error: "Failed to fetch intelligence", details: String(error) },

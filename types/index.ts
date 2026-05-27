@@ -1,9 +1,17 @@
+export type RideOperationalStatus =
+  | "open"
+  | "closed"
+  | "delayed"
+  | "maintenance";
+
 export interface QueueTimesRide {
   id: number;
   name: string;
   is_open: boolean;
   wait_time: number;
   last_updated: string;
+  /** Present on some parks/API versions — parsed when available */
+  status?: string;
 }
 
 export interface QueueTimesLand {
@@ -37,6 +45,7 @@ export interface RideWithLiveData extends Ride {
   is_open: boolean;
   wait_time: number;
   last_updated: string;
+  operationalStatus: RideOperationalStatus;
 }
 
 export type SortOption = "highest" | "lowest" | "alphabetical" | "open" | "favorites";
@@ -107,6 +116,7 @@ export interface ChartDataPoint {
   wait_time: number | null;
   label: string;
   is_open?: boolean;
+  operational_status?: RideOperationalStatus;
   historical_avg?: number;
 }
 

@@ -30,8 +30,15 @@ export function useLiveRides(initialRides: RideWithLiveData[] = []) {
   }, []);
 
   useLayoutEffect(() => {
-    refreshLive(false);
-  }, [refreshLive]);
+    if (initialRides.length > 0) {
+      mounted.current = true;
+      setIsReady(true);
+      setIsRefreshing(false);
+      void refreshLive(true);
+      return;
+    }
+    void refreshLive(false);
+  }, [refreshLive, initialRides.length]);
 
   useAutoRefresh(() => refreshLive(true), REFRESH_INTERVAL_MS, {
     runOnMount: false,

@@ -12,6 +12,7 @@ import { WAIT_THRESHOLDS } from "@/lib/constants";
 import {
   subDays,
 } from "date-fns";
+import { filterRecordsToCollectionWindow } from "@/lib/park-hours";
 import { getParkStartOfDay } from "@/lib/park-time";
 import {
   bucketRecordsByHour,
@@ -37,10 +38,12 @@ export function filterRecordsByRange(
   range: "today" | "7d" | "30d"
 ): WaitTimeRecord[] {
   const start = getTimeRangeStart(range);
-  return records.filter((r) => {
-    const ts = new Date(r.timestamp).getTime();
-    return ts >= start.getTime();
-  });
+  return filterRecordsToCollectionWindow(
+    records.filter((r) => {
+      const ts = new Date(r.timestamp).getTime();
+      return ts >= start.getTime();
+    })
+  );
 }
 
 function bucketByHour(records: WaitTimeRecord[]) {

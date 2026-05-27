@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { fetchLiveQueueTimes, flattenRides } from "@/lib/queue-times";
+import { isWithinDataCollectionWindow } from "@/lib/park-hours";
 import { roundToFiveMinutes, syncWaitTimeSnapshots } from "@/lib/sync-snapshot";
 
 export async function GET(request: Request) {
@@ -18,7 +19,17 @@ export async function GET(request: Request) {
   }
 
   try {
-    const timestamp = roundToFiveMinutes(new Date());
+    const now = new Date();
+    if (!isWithinDataCollectionWindow(now)) {
+      return NextResponse.json({
+        success: true,
+        skipped: true,
+        reason: "Outside collection window (7:30 AM – 11:00 PM park time)",
+        timestamp: now.toISOString(),
+      });
+    }
+
+    const timestamp = roundToFiveMinutes(now);
     const data = await fetchLiveQueueTimes({ noStore: true });
     const rides = flattenRides(data);
 
