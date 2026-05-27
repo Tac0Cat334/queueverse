@@ -24,6 +24,15 @@ import {
 
 type ChartColors = ReturnType<typeof useChartColors>;
 
+/** Room for Y-axis labels like "100m" — avoid negative left margin (clips ticks) */
+const CHART_Y_AXIS = {
+  width: 44,
+  tickFormatter: (v: number) => `${v}m`,
+} as const;
+
+const DAILY_CHART_MARGIN = { top: 12, right: 8, left: 12, bottom: 4 };
+const WEEKLY_CHART_MARGIN = { top: 8, right: 8, left: 12, bottom: 4 };
+
 interface EnrichedPoint extends ChartDataPoint {
   timeMs: number;
   displayLabel: string;
@@ -327,7 +336,7 @@ export function DailyWaitChart({
   );
 
   return (
-    <div className="card overflow-hidden p-4 sm:p-6">
+    <div className="card overflow-x-hidden p-4 sm:p-6">
       <div className="mb-5 flex items-end justify-between gap-3">
         <div>
           {isOpen && currentWait !== undefined ? (
@@ -364,7 +373,7 @@ export function DailyWaitChart({
       <ResponsiveContainer width="100%" height={240} className="sm:!h-[260px]">
         <AreaChart
           data={chartData}
-          margin={{ top: 12, right: 8, left: -8, bottom: 4 }}
+          margin={DAILY_CHART_MARGIN}
         >
           <defs>
             <linearGradient id={`fill-${fillId}`} x1="0" y1="0" x2="0" y2="1">
@@ -401,11 +410,10 @@ export function DailyWaitChart({
             tick={{ fill: colors.tick, fontSize: 10 }}
             tickLine={false}
             axisLine={false}
-            width={28}
+            width={CHART_Y_AXIS.width}
             domain={yDomain}
             tickCount={4}
-            tickFormatter={(v) => `${v}`}
-            unit="m"
+            tickFormatter={CHART_Y_AXIS.tickFormatter}
           />
 
           <Tooltip
@@ -618,7 +626,7 @@ export function WeeklyPatternChart({
     : undefined;
 
   return (
-    <div className="card overflow-hidden p-4 sm:p-6">
+    <div className="card overflow-x-hidden p-4 sm:p-6">
       <div className="mb-4">
         <p className="label">Typical day</p>
         <p className="mt-0.5 text-xs text-[var(--fg-muted)]">
@@ -629,7 +637,7 @@ export function WeeklyPatternChart({
       <ResponsiveContainer width="100%" height={220} className="sm:!h-[240px]">
         <AreaChart
           data={enriched}
-          margin={{ top: 8, right: 8, left: -8, bottom: 4 }}
+          margin={WEEKLY_CHART_MARGIN}
         >
           <defs>
             <linearGradient id={`weekly-fill-${fillId}`} x1="0" y1="0" x2="0" y2="1">
@@ -658,11 +666,10 @@ export function WeeklyPatternChart({
             tick={{ fill: colors.tick, fontSize: 10 }}
             tickLine={false}
             axisLine={false}
-            width={28}
+            width={CHART_Y_AXIS.width}
             domain={yDomain}
             tickCount={4}
-            tickFormatter={(v) => `${v}`}
-            unit="m"
+            tickFormatter={CHART_Y_AXIS.tickFormatter}
           />
 
           <Tooltip
