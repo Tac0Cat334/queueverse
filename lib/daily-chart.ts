@@ -37,6 +37,19 @@ function hasBucket(points: ChartDataPoint[], bucketMs: number): boolean {
   );
 }
 
+function isOpenChartPoint(point: ChartDataPoint): boolean {
+  return point.is_open !== false && point.wait_time !== null;
+}
+
+/** Drop pre-opening closed snapshots — chart starts when the ride first has open data */
+export function trimLeadingClosedSnapshots(
+  points: ChartDataPoint[]
+): ChartDataPoint[] {
+  const firstOpen = points.findIndex(isOpenChartPoint);
+  if (firstOpen === -1) return [];
+  return points.slice(firstOpen);
+}
+
 /** Build today's chart purely from server-collected history (Supabase). */
 export function buildTodayChartData(
   records: WaitTimeRecord[],
@@ -70,5 +83,5 @@ export function buildTodayChartData(
     }
   }
 
-  return merged;
+  return trimLeadingClosedSnapshots(merged);
 }

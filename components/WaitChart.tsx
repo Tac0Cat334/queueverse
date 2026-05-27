@@ -249,11 +249,6 @@ export function DailyWaitChart({
   const fillId = useId().replace(/:/g, "");
   const { chartStartMs, visibleEndMs } = getParkDayChartWindow();
   const parkDateLabel = formatParkDateLabel();
-  const xEnd = Math.max(visibleEndMs, chartStartMs + 60 * 60 * 1000);
-  const xTicks = useMemo(
-    () => buildTimeTicks(chartStartMs, xEnd, 4),
-    [chartStartMs, xEnd]
-  );
 
   const chartData: EnrichedPoint[] = useMemo(
     () =>
@@ -263,6 +258,21 @@ export function DailyWaitChart({
         displayLabel: d.label,
       })),
     [data]
+  );
+
+  const xStart = useMemo(() => {
+    if (chartData.length === 0) return chartStartMs;
+    return chartData[0].timeMs;
+  }, [chartData, chartStartMs]);
+
+  const xEnd = useMemo(
+    () => Math.max(visibleEndMs, xStart + 60 * 60 * 1000),
+    [visibleEndMs, xStart]
+  );
+
+  const xTicks = useMemo(
+    () => buildTimeTicks(xStart, xEnd, 4),
+    [xStart, xEnd]
   );
 
   const avg = useMemo(() => averageWait(chartData), [chartData]);
@@ -303,9 +313,9 @@ export function DailyWaitChart({
     return (
       <div className="card flex h-56 flex-col items-center justify-center gap-2 px-6 text-center sm:h-64">
         <p className="text-sm text-[var(--fg-muted)]">
-          Today&apos;s trend builds during park hours (7:30 AM – 11:00 PM). Gray
-          bands mean a snapshot was collected while the ride was closed, delayed,
-          or down for maintenance.
+          Today&apos;s trend appears once the ride opens and data is collected.
+          Gray bands mean a snapshot was collected while the ride was closed,
+          delayed, or down for maintenance.
         </p>
         <p className="text-xs text-[var(--fg-muted)]">
           {parkDateLabel} · Eastern time · overnight excluded
@@ -396,7 +406,7 @@ export function DailyWaitChart({
           <XAxis
             type="number"
             dataKey="timeMs"
-            domain={[chartStartMs, xEnd]}
+            domain={[xStart, xEnd]}
             ticks={xTicks}
             tickFormatter={(ms) => formatParkTime(ms)}
             tick={{ fill: colors.tick, fontSize: 10 }}
