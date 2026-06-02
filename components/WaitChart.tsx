@@ -262,7 +262,10 @@ export function DailyWaitChart({
 
   const xStart = useMemo(() => {
     if (chartData.length === 0) return chartStartMs;
-    return chartData[0].timeMs;
+    const firstOpen = chartData.find(
+      (p) => p.is_open !== false && p.wait_time !== null
+    );
+    return firstOpen?.timeMs ?? chartData[0].timeMs;
   }, [chartData, chartStartMs]);
 
   const xEnd = useMemo(
@@ -313,9 +316,8 @@ export function DailyWaitChart({
     return (
       <div className="card flex h-56 flex-col items-center justify-center gap-2 px-6 text-center sm:h-64">
         <p className="text-sm text-[var(--fg-muted)]">
-          Today&apos;s trend appears once the ride opens and data is collected.
-          Gray bands mean a snapshot was collected while the ride was closed,
-          delayed, or down for maintenance.
+          Today&apos;s trend builds as snapshots are collected every 5 minutes.
+          Gray bands mean the ride was closed, delayed, or down for maintenance.
         </p>
         <p className="text-xs text-[var(--fg-muted)]">
           {parkDateLabel} · Eastern time · overnight excluded

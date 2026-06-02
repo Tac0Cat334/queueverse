@@ -94,7 +94,9 @@ export function RideDetail({
   const todayChartData = useMemo(() => {
     if (!ride) return [];
     const base = buildTodayChartData(allRecords, ride);
-    const historicalOpen = historyRecords.filter((r) => r.is_open);
+    const historicalOpen = historyRecords.filter(
+      (r) => r.is_open && isWithinParkDay(r.timestamp)
+    );
     const averages = buildHistoricalAverageSeries(
       historicalOpen,
       base.map((d) => d.timestamp)
