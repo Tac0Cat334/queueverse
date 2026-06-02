@@ -1,16 +1,15 @@
 import type { ChartDataPoint, RideWithLiveData, WaitTimeRecord } from "@/types";
-import { isWithinDataCollectionWindow } from "@/lib/park-hours";
 import {
   formatParkTime,
-  getParkStartOfDay,
   isWithinParkDay,
 } from "@/lib/park-time";
 import { roundToFiveMinutes } from "@/lib/sync-snapshot";
 
 function toChartPoint(record: WaitTimeRecord): ChartDataPoint {
+  const hasWait = record.is_open || record.wait_time > 0;
   return {
     timestamp: record.timestamp,
-    wait_time: record.is_open ? record.wait_time : null,
+    wait_time: hasWait ? record.wait_time : null,
     is_open: record.is_open,
     operational_status: record.is_open ? "open" : "closed",
     label: formatParkTime(record.timestamp),
@@ -44,16 +43,7 @@ function filterTodayRecords(
   records: WaitTimeRecord[],
   reference = new Date()
 ): WaitTimeRecord[] {
-  const dayStart = getParkStartOfDay(reference).getTime();
-
-  return records.filter((r) => {
-    const ts = new Date(r.timestamp).getTime();
-    return (
-      ts >= dayStart &&
-      isWithinParkDay(r.timestamp, reference) &&
-      isWithinDataCollectionWindow(r.timestamp)
-    );
-  });
+  return records.filter((r) => isWithinParkDay(r.timestamp, reference));
 }
 
 /** Build today's chart from all snapshots collected today (open and closed). */

@@ -29,18 +29,27 @@ async function loadHistoricalRecords(): Promise<Map<number, WaitTimeRecord[]>> {
   const since = subDays(new Date(), HISTORY_DAYS).toISOString();
   const supabase = createServiceClient();
 
-  const { data, error } = await supabase
-    .from("wait_times")
-    .select("id, ride_id, wait_time, is_open, timestamp")
-    .gte("timestamp", since)
-    .order("timestamp", { ascending: true });
+  const pageSize = 1000;
+  let offset = 0;
 
-  if (error || !data) return byRide;
+  while (true) {
+    const { data, error } = await supabase
+      .from("wait_times")
+      .select("id, ride_id, wait_time, is_open, timestamp")
+      .gte("timestamp", since)
+      .order("timestamp", { ascending: true })
+      .range(offset, offset + pageSize - 1);
 
-  for (const record of filterRecordsToCollectionWindow(data)) {
-    const list = byRide.get(record.ride_id) ?? [];
-    list.push(record);
-    byRide.set(record.ride_id, list);
+    if (error || !data?.length) break;
+
+    for (const record of filterRecordsToCollectionWindow(data)) {
+      const list = byRide.get(record.ride_id) ?? [];
+      list.push(record);
+      byRide.set(record.ride_id, list);
+    }
+
+    if (data.length < pageSize) break;
+    offset += pageSize;
   }
 
   return byRide;

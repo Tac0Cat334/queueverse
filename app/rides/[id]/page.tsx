@@ -29,6 +29,7 @@ export default async function RidePage({ params }: PageProps) {
       rideId={rideId}
       initialRides={initial.rides}
       initialRecords={initial.records}
+      initialTodayRecords={initial.todayRecords}
       initialConfigured={initial.configured}
     />
   );

@@ -1,8 +1,11 @@
 import { NextResponse } from "next/server";
-import { getWaitTimesForRide, isSupabaseConfigured } from "@/lib/supabase";
+import {
+  getTodayWaitTimesForRide,
+  getWaitTimesForRide,
+  isSupabaseConfigured,
+} from "@/lib/supabase";
 import { getTimeRangeStart } from "@/lib/analytics";
 import { filterRecordsToCollectionWindow } from "@/lib/park-hours";
-import { getParkEndOfDay } from "@/lib/park-time";
 import type { TimeRange } from "@/types";
 
 export async function GET(request: Request) {
@@ -19,11 +22,13 @@ export async function GET(request: Request) {
   }
 
   try {
-    const since = getTimeRangeStart(range);
-    const until = range === "today" ? getParkEndOfDay() : undefined;
-    const records = filterRecordsToCollectionWindow(
-      await getWaitTimesForRide(Number(rideId), since, until)
-    );
+    const id = Number(rideId);
+    const records =
+      range === "today"
+        ? await getTodayWaitTimesForRide(id)
+        : filterRecordsToCollectionWindow(
+            await getWaitTimesForRide(id, getTimeRangeStart(range))
+          );
     return NextResponse.json(
       { records, configured: true },
       {

@@ -35,13 +35,30 @@ interface RideDetailProps {
   rideId: number;
   initialRides?: RideWithLiveData[];
   initialRecords?: WaitTimeRecord[];
+  initialTodayRecords?: WaitTimeRecord[];
   initialConfigured?: boolean;
+}
+
+function mergeRecordsByTimestamp(
+  ...groups: WaitTimeRecord[][]
+): WaitTimeRecord[] {
+  const byKey = new Map<string, WaitTimeRecord>();
+  for (const group of groups) {
+    for (const record of group) {
+      byKey.set(`${record.ride_id}-${record.timestamp}`, record);
+    }
+  }
+  return Array.from(byKey.values()).sort(
+    (a, b) =>
+      new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+  );
 }
 
 export function RideDetail({
   rideId,
   initialRides = [],
   initialRecords = [],
+  initialTodayRecords = [],
   initialConfigured = true,
 }: RideDetailProps) {
   const { rides, isRefreshing, isReady, refreshLive } =
@@ -49,6 +66,11 @@ export function RideDetail({
   const ride = rides.find((r) => r.ride_id === rideId) ?? null;
   const [historyRecords, setHistoryRecords] =
     useState<WaitTimeRecord[]>(initialRecords);
+  const [todayRecords, setTodayRecords] = useState<WaitTimeRecord[]>(
+    initialTodayRecords.length > 0
+      ? initialTodayRecords
+      : initialRecords.filter((r) => isWithinParkDay(r.timestamp))
+  );
   const [historyRefreshing, setHistoryRefreshing] = useState(false);
   const [configured, setConfigured] = useState(initialConfigured);
   const { isFavorite, toggleFavorite } = useFavorites();
@@ -56,14 +78,26 @@ export function RideDetail({
   const fetchHistory = useCallback(async (background = false) => {
     if (!background) setHistoryRefreshing(true);
     try {
-      const res = await fetch(`/api/history?rideId=${rideId}&range=30d`);
-      if (!res.ok) return;
-      const data = await res.json();
-      setHistoryRecords(data.records ?? []);
-      setConfigured(data.configured !== false);
+      const [todayRes, historyRes] = await Promise.all([
+        fetch(`/api/history?rideId=${rideId}&range=today`),
+        fetch(`/api/history?rideId=${rideId}&range=30d`),
+      ]);
+      if (!todayRes.ok || !historyRes.ok) return;
+
+      const todayData = await todayRes.json();
+      const historyData = await historyRes.json();
+      const today = todayData.records ?? [];
+      const history = historyData.records ?? [];
+
+      setTodayRecords(today);
+      setHistoryRecords(mergeRecordsByTimestamp(history, today));
+      setConfigured(
+        todayData.configured !== false && historyData.configured !== false
+      );
     } catch {
       if (!background) {
         setHistoryRecords([]);
+        setTodayRecords([]);
       }
     } finally {
       if (!background) setHistoryRefreshing(false);
@@ -89,14 +123,10 @@ export function RideDetail({
     [ride, historyRecords]
   );
 
-  const allRecords = historyRecords;
-
   const todayChartData = useMemo(() => {
     if (!ride) return [];
-    const base = buildTodayChartData(allRecords, ride);
-    const historicalOpen = historyRecords.filter(
-      (r) => r.is_open && isWithinParkDay(r.timestamp)
-    );
+    const base = buildTodayChartData(todayRecords, ride);
+    const historicalOpen = todayRecords.filter((r) => r.is_open);
     const averages = buildHistoricalAverageSeries(
       historicalOpen,
       base.map((d) => d.timestamp)
@@ -105,12 +135,9 @@ export function RideDetail({
       ...point,
       historical_avg: averages[index] > 0 ? averages[index] : undefined,
     }));
-  }, [allRecords, ride, historyRecords]);
+  }, [todayRecords, ride]);
 
-  const todayParkRecords = useMemo(
-    () => allRecords.filter((r) => isWithinParkDay(r.timestamp)),
-    [allRecords]
-  );
+  const todayParkRecords = todayRecords;
   const todaySnapshotCount = todayParkRecords.filter((r) => r.is_open).length;
   const closedSnapshotCount = todayParkRecords.filter((r) => !r.is_open).length;
 
@@ -125,7 +152,10 @@ export function RideDetail({
     [historyRecords, ride]
   );
 
-  const chartsReady = initialRecords.length > 0 || !historyRefreshing;
+  const chartsReady =
+    initialTodayRecords.length > 0 ||
+    initialRecords.length > 0 ||
+    !historyRefreshing;
 
   if (!ride && (isRefreshing || !isReady)) {
     return (
